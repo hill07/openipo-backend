@@ -5,7 +5,8 @@ import {
     logout,
     getMe,
     setup2FA,
-    confirm2FA
+    confirm2FA,
+    changePassword
 } from '../controllers/adminAuth.controller.js';
 import { protectAdmin } from '../middlewares/adminAuth.middleware.js';
 
@@ -20,5 +21,6 @@ router.post('/logout', logout);
 router.get('/me', protectAdmin, getMe);
 router.post('/2fa/setup', setup2FA); // Handles both logged-in and pre-2fa logic
 router.post('/2fa/confirm', confirm2FA);
+router.put('/password', protectAdmin, changePassword);
 
 export default router;

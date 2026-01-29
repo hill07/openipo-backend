@@ -14,7 +14,10 @@ export const getIpos = async (req, res, next) => {
         };
 
         if (type) query.type = type;
-        if (status) query.status = status.toUpperCase();
+        if (status) {
+            const statusArray = status.split(",").map(s => s.trim().toUpperCase());
+            query.status = { $in: statusArray };
+        }
         if (search) {
             query.$text = { $search: search };
         }

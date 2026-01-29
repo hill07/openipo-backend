@@ -250,6 +250,11 @@ export const confirm2FA = async (req, res, next) => {
         const hashedCodes = await Promise.all(backupCodes.map(code => bcrypt.hash(code, 10)));
 
         admin.twoFactorBackupCodes = hashedCodes;
+
+        // Update Login Stats since they are now effectively logged in
+        admin.lastLoginAt = new Date();
+        admin.lastLoginIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+
         await admin.save();
 
         await logAdminAction(admin._id, '2FA_SETUP_COMPLETE', req);
@@ -269,3 +274,28 @@ export const confirm2FA = async (req, res, next) => {
         next(err);
     }
 }
+
+// @desc    Change Password
+// @route   PUT /api/admin/auth/password
+// @access  Private
+export const changePassword = async (req, res, next) => {
+    try {
+        const { currentPassword, newPassword } = req.body;
+        const admin = await Admin.findById(req.admin._id).select('+passwordHash');
+
+        if (!(await admin.matchPassword(currentPassword))) {
+            return res.status(401).json({ message: 'Incorrect current password' });
+        }
+
+        const salt = await bcrypt.genSalt(10);
+        admin.passwordHash = await bcrypt.hash(newPassword, salt);
+        admin.passwordChangedAt = new Date();
+
+        await admin.save();
+        await logAdminAction(admin._id, 'PASSWORD_CHANGE', req);
+
+        res.json({ message: 'Password updated successfully' });
+    } catch (err) {
+        next(err);
+    }
+};

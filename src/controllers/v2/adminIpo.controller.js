@@ -167,14 +167,11 @@ export const deleteIpo = async (req, res, next) => {
 
         if (!ipo) return responseHandler(res, 404, false, null, 'IPO not found');
 
-        ipo.isDeleted = true;
-        ipo.deletedAt = new Date();
-        ipo.updatedBy = req.admin._id;
-        await ipo.save();
+        await IpoFull.deleteOne({ _id: ipo._id });
 
         await logAdminAction(req.admin._id, 'DELETE_IPO', req, { slug });
 
-        return responseHandler(res, 200, true, null, 'IPO Soft Deleted');
+        return responseHandler(res, 200, true, null, 'IPO Deleted Permanently');
     } catch (error) {
         next(error);
     }
