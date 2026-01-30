@@ -107,43 +107,36 @@ const ipoFullSchema = z.object({
 
     // Subscription
     subscription: z.object({
-        updatedAtText: z.string().optional(),
-        source: z.string().optional(),
+        categories: z.array(z.object({
+            enabled: z.boolean().default(true).optional(),
+            category: z.string().optional(),
+            sharesOffered: numeric,
+            appliedShares: numeric
+        })).optional(),
+
+        // Totals (Backend Calculated)
+        totalTimes: numeric,
+        totalOffered: numeric,
+        totalApplied: numeric,
 
         days: z.array(z.object({
             day: z.string().optional(),
-            date: dateSchema,
+            date: z.string().or(z.date()).optional(), // Allow date string or object
             qib: numeric,
             retail: numeric,
             hni: numeric,
             shni: numeric,
             bhni: numeric,
             total: numeric
-        })).optional(),
-
-        summary: z.object({
-            qib: numeric,
-            retail: numeric,
-            hni: numeric,
-            shni: numeric,
-            bhni: numeric,
-            emp: numeric,
-            total: numeric
-        }).optional(),
-
-        categories: z.array(z.object({
-            name: z.string().optional(),
-            sharesOffered: numeric,
-            sharesBid: numeric,
-            subscriptionTimes: numeric
         })).optional()
     }).optional(),
 
     // Reservation
     reservations: z.array(z.object({
-        name: z.string().optional(),
+        enabled: z.boolean().default(true).optional(),
+        category: z.string().optional(),
         sharesOffered: numeric,
-        percentage: numeric
+        anchorShares: numeric
     })).optional(),
 
     // Lot Distribution

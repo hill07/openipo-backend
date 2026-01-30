@@ -56,56 +56,68 @@ export const computeDerivedFields = (ipoDoc) => {
     }
 
     // 4. Reservation Percentages
-    // Normalize percentages based on Total Shares offered in Reservations
     if (Array.isArray(ipoDoc.reservations) && ipoDoc.reservations.length > 0) {
-        let totalResShares = ipoDoc.reservations.reduce((acc, r) => acc + (Number(r.sharesOffered) || 0), 0);
+        // Priority: issueBreakdown.total.shares > issueSize.shares > Sum of Reservations
+        const breakdownTotal = Number(ipoDoc.issueBreakdown?.total?.shares);
+        const issueSizeTotal = Number(ipoDoc.issueSize?.shares);
+        const sumReservations = ipoDoc.reservations.reduce((acc, r) => (r.enabled !== false ? acc + (Number(r.sharesOffered) || 0) : acc), 0);
+
+        let totalResShares = breakdownTotal || issueSizeTotal || sumReservations;
 
         if (totalResShares > 0) {
             ipoDoc.reservations.forEach(r => {
-                const offered = Number(r.sharesOffered) || 0;
-                r.percentage = Number(((offered / totalResShares) * 100).toFixed(2));
+                if (r.enabled !== false) {
+                    const offered = Number(r.sharesOffered) || 0;
+                    r.percentage = Number(((offered / totalResShares) * 100).toFixed(2));
+                }
             });
         }
     }
 
-    // 5. Subscription Summary
+    // 5. Subscription Times (Dynamic)
     if (ipoDoc.subscription && Array.isArray(ipoDoc.subscription.categories)) {
 
-        const summary = {
-            qib: 0, retail: 0, hni: 0, shni: 0, bhni: 0, emp: 0, total: 0
-        };
         let totalOffered = 0;
         let totalApplied = 0;
+        // let totalAnchor = 0; // We might need this if we want to subtract from Total Offered globally?
+        // User rule: Total subscription MUST be calculated exactly as: TOTAL = QIB + HNI + Retail + Employee + Shareholder + Policyholder
+        // MarketMaker excluded. Anchor excluded.
 
         ipoDoc.subscription.categories.forEach(cat => {
-            // Try to match sharesOffered from Reservations if specific category logic applies
-            // (Skipped for now, assuming frontend or pre-calc handles exact sharesOffered)
+            if (cat.enabled !== false) {
+                // Skip Market Maker for Subscription Totals
+                if (cat.category === 'MarketMaker') return;
 
-            const offered = Number(cat.sharesOffered) || 0;
-            const applied = Number(cat.sharesBid) || 0;
+                const offered = Number(cat.sharesOffered) || 0;
+                const applied = Number(cat.appliedShares) || 0;
+                let effectiveOffered = offered;
 
-            // Recalculate Times if needed
-            if (offered > 0) {
-                cat.subscriptionTimes = Number((applied / offered).toFixed(2));
-            } else {
-                cat.subscriptionTimes = 0;
-            }
+                // For QIB, subtract Anchor shares
+                if (cat.category === 'QIB') {
+                    // Find anchor shares from Reservations
+                    const qibRes = ipoDoc.reservations?.find(r => r.category === 'QIB');
+                    const anchor = Number(qibRes?.anchorShares) || 0;
+                    effectiveOffered = Math.max(0, offered - anchor);
+                    // totalAnchor += anchor;
+                }
 
-            totalOffered += offered;
-            totalApplied += applied;
+                // Times Calculation
+                if (effectiveOffered > 0) {
+                    cat.times = Number((applied / effectiveOffered).toFixed(2));
+                } else {
+                    cat.times = 0;
+                }
 
-            // Map to Summary fields
-            const name = (cat.name || '').toLowerCase();
-            const times = cat.subscriptionTimes || 0;
+                // Add to Totals (Using effective offered? "Total = QIB + ..." implied applied.
+                // But for "Total Times", usually it is Total Applied / Total Effective Offered.
+                // User said: "TOTAL subscription MUST be calculated exactly as: TOTAL = QIB + HNI + ..."
+                // This likely means the *sum of components*.
+                // And "MarketMaker excluded. Anchor excluded."
+                // So Total Applied = Sum(Applied)
+                // Total Offered = Sum(Effective Offered) [Offered - Anchor]
 
-            if (name.includes('qib')) summary.qib = times;
-            else if (name.includes('retail') || name.includes('individual')) summary.retail = times;
-            else if (name.includes('employee') || name.includes('emp')) summary.emp = times;
-            else if (name.includes('nii') || name.includes('hni')) {
-                // Split logic
-                if (name.includes('bhni') || name.includes('big')) summary.bhni = times;
-                else if (name.includes('shni') || name.includes('small')) summary.shni = times;
-                else summary.hni = times; // Generic HNI/NII maps to hni
+                totalOffered += effectiveOffered;
+                totalApplied += applied;
             }
         });
 
@@ -114,9 +126,11 @@ export const computeDerivedFields = (ipoDoc) => {
         if (totalOffered > 0) {
             totalTimes = Number((totalApplied / totalOffered).toFixed(2));
         }
-        summary.total = totalTimes;
 
-        ipoDoc.subscription.summary = summary;
+        // Add totals to subscription object if it's a plain object
+        ipoDoc.subscription.totalTimes = totalTimes;
+        ipoDoc.subscription.totalOffered = totalOffered;
+        ipoDoc.subscription.totalApplied = totalApplied;
     }
 
     return ipoDoc;

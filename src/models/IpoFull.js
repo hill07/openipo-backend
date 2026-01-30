@@ -19,6 +19,32 @@ const gmpHistorySchema = new mongoose.Schema({
     updatedAt: { type: Date, default: Date.now }
 });
 
+const subscriptionCategorySchema = new mongoose.Schema({
+    enabled: { type: Boolean, default: true },
+    category: String,
+    sharesOffered: Number,
+    appliedShares: Number
+}, { toJSON: { virtuals: true }, toObject: { virtuals: true } });
+
+subscriptionCategorySchema.virtual('times').get(function () {
+    if (!this.sharesOffered || !this.appliedShares) return 0;
+    return this.appliedShares / this.sharesOffered;
+});
+
+const reservationSchema = new mongoose.Schema({
+    enabled: { type: Boolean, default: true },
+    category: String,        // Retail, QIB, HNI, Employee, Shareholder, Policyholder, MarketMaker
+    sharesOffered: Number,
+    anchorShares: Number     // only when category === "QIB"
+}, { toJSON: { virtuals: true }, toObject: { virtuals: true } });
+
+reservationSchema.virtual('percentage').get(function () {
+    // Access parent document (IpoFull)
+    const ipo = this.ownerDocument ? this.ownerDocument() : this.parent();
+    if (!ipo || !ipo.totalIssueShares) return 0;
+    return (this.sharesOffered / ipo.totalIssueShares) * 100;
+});
+
 /* ---------- Main Schema ---------- */
 
 const ipoFullSchema = new mongoose.Schema({
@@ -124,31 +150,14 @@ const ipoFullSchema = new mongoose.Schema({
 
         days: [subscriptionDaySchema],
 
-        summary: {
-            qib: Number,
-            retail: Number,
-            hni: Number,
-            shni: Number,
-            bhni: Number,
-            emp: Number,
-            total: Number
-        },
+        // REMOVED: summary (dynamic calculation only)
 
-        categories: [{
-            name: String,
-            sharesOffered: Number,
-            sharesBid: Number,
-            subscriptionTimes: Number
-        }]
+        categories: [subscriptionCategorySchema]
     },
 
     /* ===== Reservation ===== */
 
-    reservations: [{
-        name: String,
-        sharesOffered: Number,
-        percentage: Number
-    }],
+    reservations: [reservationSchema],
 
     /* ===== Lot Distribution ===== */
 
@@ -242,7 +251,37 @@ const ipoFullSchema = new mongoose.Schema({
     deletedAt: Date
 
 }, {
-    timestamps: true
+    timestamps: true,
+    toJSON: { virtuals: true },
+    toObject: { virtuals: true }
+});
+
+/* Virtuals */
+
+ipoFullSchema.virtual('totalIssueShares').get(function () {
+    if (!this.reservations) return 0;
+    return this.reservations.reduce((sum, r) => (r.enabled && r.sharesOffered) ? sum + r.sharesOffered : sum, 0);
+});
+
+ipoFullSchema.virtual('subscription.totalTimes').get(function () {
+    if (!this.subscription || !this.subscription.categories) return 0;
+
+    // Sum enabled categories
+    const totalOffered = this.subscription.categories.reduce((sum, c) => (c.enabled && c.sharesOffered) ? sum + c.sharesOffered : sum, 0);
+    const totalApplied = this.subscription.categories.reduce((sum, c) => (c.enabled && c.appliedShares) ? sum + c.appliedShares : sum, 0);
+
+    if (!totalOffered) return 0;
+    return totalApplied / totalOffered;
+});
+
+ipoFullSchema.virtual('subscription.totalOffered').get(function () {
+    if (!this.subscription || !this.subscription.categories) return 0;
+    return this.subscription.categories.reduce((sum, c) => (c.enabled && c.sharesOffered) ? sum + c.sharesOffered : sum, 0);
+});
+
+ipoFullSchema.virtual('subscription.totalApplied').get(function () {
+    if (!this.subscription || !this.subscription.categories) return 0;
+    return this.subscription.categories.reduce((sum, c) => (c.enabled && c.appliedShares) ? sum + c.appliedShares : sum, 0);
 });
 
 /* Text Index */
