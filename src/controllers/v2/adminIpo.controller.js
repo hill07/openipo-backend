@@ -122,6 +122,9 @@ export const updateIpo = async (req, res, next) => {
 
         const validatedUpdates = ipoFullSchema.partial().parse(req.body);
 
+        console.log('[DEBUG] UpdateIPO payload financials:', JSON.stringify(req.body.financials, null, 2));
+        console.log('[DEBUG] ValidatedUpdates financials:', JSON.stringify(validatedUpdates.financials, null, 2));
+
         // Compute Derived Fields (Merge with existing data to ensure dependency availability)
         const mergedDoc = { ...ipo.toObject(), ...validatedUpdates };
         computeDerivedFields(mergedDoc);
@@ -144,7 +147,12 @@ export const updateIpo = async (req, res, next) => {
             { new: true, runValidators: true }
         );
 
-        await logAdminAction(req.admin._id, 'UPDATE_IPO', req, { slug, company: updatedIpo.companyName });
+        await logAdminAction(req.admin._id, 'UPDATE_IPO', req, {
+            slug,
+            company: updatedIpo.companyName,
+            debugPayload: req.body.financials, // Log raw financials
+            debugValidated: validatedUpdates.financials // Log validated financials
+        });
 
         return responseHandler(res, 200, true, updatedIpo, 'IPO Updated Successfully');
     } catch (error) {

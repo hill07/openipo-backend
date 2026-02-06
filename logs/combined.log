@@ -249,3 +249,21 @@
 {"level":"info","message":"✅ MongoDB Connected: ac-exrwgag-shard-00-02.o1lz01x.mongodb.net","service":"openipo-backend","timestamp":"2026-01-30T09:11:06.703Z"}
 {"level":"info","message":"✅ Server running on port 5000","service":"openipo-backend","timestamp":"2026-01-30T09:11:06.726Z"}
 {"level":"info","message":"✅ MongoDB Connected: ac-exrwgag-shard-00-01.o1lz01x.mongodb.net","service":"openipo-backend","timestamp":"2026-01-30T10:36:24.462Z"}
+{"level":"info","message":"✅ MongoDB Connected: ac-exrwgag-shard-00-00.o1lz01x.mongodb.net","service":"openipo-backend","timestamp":"2026-01-31T09:00:16.720Z"}
+{"level":"info","message":"✅ Server running on port 5000","service":"openipo-backend","timestamp":"2026-01-31T09:00:16.757Z"}
+{"level":"info","message":"✅ MongoDB Connected: ac-exrwgag-shard-00-01.o1lz01x.mongodb.net","service":"openipo-backend","timestamp":"2026-01-31T09:16:13.864Z"}
+{"level":"info","message":"✅ Server running on port 5000","service":"openipo-backend","timestamp":"2026-01-31T09:16:13.890Z"}
+{"level":"info","message":"✅ MongoDB Connected: ac-exrwgag-shard-00-01.o1lz01x.mongodb.net","service":"openipo-backend","timestamp":"2026-01-31T10:23:55.842Z"}
+{"level":"info","message":"✅ Server running on port 5000","service":"openipo-backend","timestamp":"2026-01-31T10:23:55.892Z"}
+{"level":"info","message":"✅ MongoDB Connected: ac-exrwgag-shard-00-00.o1lz01x.mongodb.net","service":"openipo-backend","timestamp":"2026-02-06T04:17:27.254Z"}
+{"level":"info","message":"✅ Server running on port 5000","service":"openipo-backend","timestamp":"2026-02-06T04:17:27.297Z"}
+{"error":"Not Found - /favicon.ico","level":"error","message":"Error occurred","method":"GET","service":"openipo-backend","stack":"Error: Not Found - /favicon.ico\n    at notFound (file:///D:/openipo/backend/src/middlewares/notFound.js:2:19)\n    at Layer.handle [as handle_request] (D:\\openipo\\backend\\node_modules\\express\\lib\\router\\layer.js:95:5)\n    at trim_prefix (D:\\openipo\\backend\\node_modules\\express\\lib\\router\\index.js:328:13)\n    at D:\\openipo\\backend\\node_modules\\express\\lib\\router\\index.js:286:9\n    at router.process_params (D:\\openipo\\backend\\node_modules\\express\\lib\\router\\index.js:346:12)\n    at next (D:\\openipo\\backend\\node_modules\\express\\lib\\router\\index.js:280:10)\n    at file:///D:/openipo/backend/node_modules/express-rate-limit/dist/index.mjs:779:7\n    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)\n    at async file:///D:/openipo/backend/node_modules/express-rate-limit/dist/index.mjs:663:5","timestamp":"2026-02-06T04:21:27.043Z","url":"/favicon.ico"}
+{"level":"info","message":"✅ MongoDB Connected: ac-exrwgag-shard-00-00.o1lz01x.mongodb.net","service":"openipo-backend","timestamp":"2026-02-06T04:23:20.896Z"}
+{"level":"info","message":"✅ MongoDB Connected: ac-exrwgag-shard-00-01.o1lz01x.mongodb.net","service":"openipo-backend","timestamp":"2026-02-06T04:24:19.442Z"}
+{"level":"info","message":"✅ Server running on port 5000","service":"openipo-backend","timestamp":"2026-02-06T04:24:19.512Z"}
+{"level":"info","message":"✅ MongoDB Connected: ac-exrwgag-shard-00-00.o1lz01x.mongodb.net","service":"openipo-backend","timestamp":"2026-02-06T04:24:55.735Z"}
+{"level":"info","message":"✅ Server running on port 5000","service":"openipo-backend","timestamp":"2026-02-06T04:24:55.770Z"}
+{"level":"info","message":"✅ MongoDB Connected: ac-exrwgag-shard-00-01.o1lz01x.mongodb.net","service":"openipo-backend","timestamp":"2026-02-06T06:24:50.411Z"}
+{"level":"info","message":"✅ Server running on port 5000","service":"openipo-backend","timestamp":"2026-02-06T06:24:50.431Z"}
+{"level":"info","message":"✅ MongoDB Connected: ac-exrwgag-shard-00-01.o1lz01x.mongodb.net","service":"openipo-backend","timestamp":"2026-02-06T08:10:59.142Z"}
+{"level":"info","message":"✅ Server running on port 5000","service":"openipo-backend","timestamp":"2026-02-06T08:10:59.184Z"}
