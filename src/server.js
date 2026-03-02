@@ -1,4 +1,4 @@
-import express from 'express'; // Force Restart 1
+import express from 'express'; // Force Restart 3
 import cors from "cors";
 import helmet from "helmet";
 import dotenv from "dotenv";
@@ -18,13 +18,19 @@ import visitorRoutes from "./routes/visitor.routes.js";
 
 // Admin Auth (Kept)
 import adminAuthRoutes from "./routes/adminAuth.routes.js";
+
+// Public User Auth
+import authRoutes from "./routes/auth.routes.js";
 import { notFound as notFoundMiddleware } from "./middlewares/notFound.js";
 import { errorHandler } from "./middlewares/errorHandler.js";
 
 import logger from './utils/logger.js';
+import { initAlertScheduler } from './utils/alertScheduler.js';
 
 dotenv.config();
 await connectDB();
+
+initAlertScheduler();
 
 const app = express();
 app.disable("x-powered-by");
@@ -84,6 +90,9 @@ app.get("/", (req, res) => res.send("✅ OpenIPO V2 Backend Running"));
 // Admin Auth
 app.use("/api/admin/auth", adminAuthRoutes);
 
+// Public User Auth
+app.use("/api/auth", authRoutes);
+
 // V2 Admin IPOs
 app.use("/api/v2/admin/ipos", adminIpoRoutes);
 
@@ -99,3 +108,4 @@ app.use(errorHandler);
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => logger.info(`✅ Server running on port ${PORT}`));
+// reboot
