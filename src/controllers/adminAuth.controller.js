@@ -45,7 +45,8 @@ export const loginStep1 = async (req, res, next) => {
                 // If YES 2FA -> Redirect to Verify Page (with a temp token)
 
                 // Generate TEMP token (short lived, limited scope)
-                const tempToken = jwt.sign({ id: admin._id, scope: 'pre_2fa' }, process.env.JWT_SECRET, { expiresIn: '5m' });
+                const jwtSecret = process.env.JWT_SECRET || "fallback_secret_for_development";
+                const tempToken = jwt.sign({ id: admin._id, scope: 'pre_2fa' }, jwtSecret, { expiresIn: '5m' });
 
                 await logAdminAction(admin._id, 'LOGIN_STEP1_SUCCESS', req, { message: "2FA not enabled yet" });
 
@@ -57,7 +58,8 @@ export const loginStep1 = async (req, res, next) => {
             }
 
             // 2FA Enabled -> returning temp token for verification
-            const tempToken = jwt.sign({ id: admin._id, scope: 'pre_2fa' }, process.env.JWT_SECRET, { expiresIn: '5m' });
+            const jwtSecret = process.env.JWT_SECRET || "fallback_secret_for_development";
+            const tempToken = jwt.sign({ id: admin._id, scope: 'pre_2fa' }, jwtSecret, { expiresIn: '5m' });
 
             await logAdminAction(admin._id, 'LOGIN_STEP1_SUCCESS', req, { message: "Proceed to 2FA" });
 
@@ -93,7 +95,8 @@ export const verify2FA = async (req, res, next) => {
         // Verify temp token
         let decoded;
         try {
-            decoded = jwt.verify(tempToken, process.env.JWT_SECRET);
+            const jwtSecret = process.env.JWT_SECRET || "fallback_secret_for_development";
+            decoded = jwt.verify(tempToken, jwtSecret);
             if (decoded.scope !== 'pre_2fa') return res.status(401).json({ message: "Invalid token scope" });
         } catch (e) {
             return res.status(401).json({ message: "Session expired" });
@@ -172,7 +175,8 @@ export const setup2FA = async (req, res, next) => {
             // If coming from Step 1 (Force Setup)
             const { tempToken } = req.body;
             if (!tempToken) return res.status(401).json({ message: "Unlock token required" });
-            const decoded = jwt.verify(tempToken, process.env.JWT_SECRET);
+            const jwtSecret = process.env.JWT_SECRET || "fallback_secret_for_development";
+            const decoded = jwt.verify(tempToken, jwtSecret);
             adminId = decoded.id;
         }
 
@@ -215,7 +219,8 @@ export const confirm2FA = async (req, res, next) => {
             // If we are calling this endpoint, we might assume protectAdmin OR manual check if coming from pre_2fa
             // For simplicity let's handle "pre_2fa" token if cookie missing
             try {
-                const decoded = jwt.verify(req.cookies.admin_token, process.env.JWT_SECRET);
+                const jwtSecret = process.env.JWT_SECRET || "fallback_secret_for_development";
+                const decoded = jwt.verify(req.cookies.admin_token, jwtSecret);
                 adminId = decoded.id;
             } catch (e) {
                 // fall back to tempToken
@@ -223,7 +228,8 @@ export const confirm2FA = async (req, res, next) => {
         }
 
         if (!adminId && tempToken) {
-            const decoded = jwt.verify(tempToken, process.env.JWT_SECRET);
+            const jwtSecret = process.env.JWT_SECRET || "fallback_secret_for_development";
+            const decoded = jwt.verify(tempToken, jwtSecret);
             adminId = decoded.id;
         }
 

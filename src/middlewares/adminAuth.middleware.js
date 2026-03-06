@@ -16,7 +16,8 @@ export const protectAdmin = async (req, res, next) => {
     }
 
     try {
-        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        const jwtSecret = process.env.JWT_SECRET || "fallback_secret_for_development";
+        const decoded = jwt.verify(token, jwtSecret);
 
         // Select logic remains same as old file
         const admin = await Admin.findById(decoded.id).select('-passwordHash -twoFactorSecretEncrypted -twoFactorBackupCodes');
