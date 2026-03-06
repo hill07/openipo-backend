@@ -8,7 +8,8 @@ const sendEmail = async ({ to, subject, text, html }) => {
 
         // Check if we have real SMTP credentials in env
         if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
-
+console.log("SMTP_USER:", process.env.SMTP_USER);
+console.log("SMTP_PASS:", process.env.SMTP_PASS ? "Loaded" : "Not Loaded");
             // Explicitly verify if the user left the default placeholder values
             if (process.env.SMTP_USER === 'your_email@gmail.com') {
                 throw new Error("SMTP credentials are not configured. Please update your .env file.");
