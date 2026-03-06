@@ -376,3 +376,9 @@
 {"level":"info","message":"✅ MongoDB Connected: ac-exrwgag-shard-00-00.o1lz01x.mongodb.net","service":"openipo-backend","timestamp":"2026-03-01T11:50:02.547Z"}
 {"level":"info","message":"Initializing node-cron for IPO alerts...","service":"openipo-backend","timestamp":"2026-03-01T11:50:02.557Z"}
 {"level":"info","message":"✅ Server running on port 5000","service":"openipo-backend","timestamp":"2026-03-01T11:50:02.816Z"}
+{"level":"info","message":"✅ MongoDB Connected: ac-exrwgag-shard-00-00.o1lz01x.mongodb.net","service":"openipo-backend","timestamp":"2026-03-06T03:14:24.504Z"}
+{"level":"info","message":"Initializing node-cron for IPO alerts...","service":"openipo-backend","timestamp":"2026-03-06T03:14:24.509Z"}
+{"level":"info","message":"✅ Server running on port 5000","service":"openipo-backend","timestamp":"2026-03-06T03:14:24.687Z"}
+{"level":"info","message":"✅ MongoDB Connected: ac-exrwgag-shard-00-00.o1lz01x.mongodb.net","service":"openipo-backend","timestamp":"2026-03-06T03:23:37.998Z"}
+{"level":"info","message":"Initializing node-cron for IPO alerts...","service":"openipo-backend","timestamp":"2026-03-06T03:23:38.008Z"}
+{"level":"info","message":"✅ Server running on port 5000","service":"openipo-backend","timestamp":"2026-03-06T03:23:38.117Z"}

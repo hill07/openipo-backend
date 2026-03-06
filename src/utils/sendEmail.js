@@ -54,10 +54,10 @@ const sendEmail = async ({ to, subject, text, html }) => {
             logger.info(`Preview URL: ${nodemailer.getTestMessageUrl(info)}`);
         }
 
-        return info;    
+        return info;
     } catch (error) {
         logger.error(`Error sending email: ${error.message}`);
-        throw new Error("Email could not be sent.");
+        throw new Error("Email Error: " + error.message);
     }
 };
 export default sendEmail;

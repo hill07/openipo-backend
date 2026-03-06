@@ -78,7 +78,7 @@ export const registerUser = async (req, res) => {
         });
     } catch (error) {
         logger.error(`Error in registerUser: ${error.message}`);
-        res.status(500).json({ success: false, message: "Server Error" });
+        res.status(500).json({ success: false, message: error.message || "Server Error" });
     }
 };
 
@@ -113,7 +113,8 @@ export const verifyOtp = async (req, res) => {
         user.otpExpires = null;
         await user.save();
 
-        const sessionToken = jwt.sign({ id: user._id }, process.env.JWT_SECRET, {
+        const jwtSecret = process.env.JWT_SECRET || "fallback_secret_for_development";
+        const sessionToken = jwt.sign({ id: user._id }, jwtSecret, {
             expiresIn: "7d",
         });
 
@@ -129,7 +130,7 @@ export const verifyOtp = async (req, res) => {
         });
     } catch (error) {
         logger.error(`Error in verifyOtp: ${error.message}`);
-        res.status(500).json({ success: false, message: "Server Error" });
+        res.status(500).json({ success: false, message: error.message || "Server Error" });
     }
 };
 
@@ -157,7 +158,8 @@ export const loginUser = async (req, res) => {
             return res.status(400).json({ success: false, message: "Invalid credentials" });
         }
 
-        const sessionToken = jwt.sign({ id: user._id }, process.env.JWT_SECRET, {
+        const jwtSecret = process.env.JWT_SECRET || "fallback_secret_for_development";
+        const sessionToken = jwt.sign({ id: user._id }, jwtSecret, {
             expiresIn: "7d",
         });
 
@@ -173,7 +175,7 @@ export const loginUser = async (req, res) => {
         });
     } catch (error) {
         logger.error(`Error in loginUser: ${error.message}`);
-        res.status(500).json({ success: false, message: "Server Error" });
+        res.status(500).json({ success: false, message: error.message || "Server Error" });
     }
 };
 
@@ -207,7 +209,7 @@ export const updateProfile = async (req, res) => {
         });
     } catch (error) {
         logger.error(`Error in updateProfile: ${error.message}`);
-        res.status(500).json({ success: false, message: "Server Error" });
+        res.status(500).json({ success: false, message: error.message || "Server Error" });
     }
 };
 
@@ -231,7 +233,7 @@ export const toggleAlert = async (req, res) => {
         }
     } catch (error) {
         logger.error(`Error in toggleAlert: ${error.message}`);
-        res.status(500).json({ success: false, message: "Server Error" });
+        res.status(500).json({ success: false, message: error.message || "Server Error" });
     }
 };
 
@@ -241,6 +243,6 @@ export const getMyAlerts = async (req, res) => {
         res.status(200).json({ success: true, data: alerts });
     } catch (error) {
         logger.error(`Error in getMyAlerts: ${error.message}`);
-        res.status(500).json({ success: false, message: "Server Error" });
+        res.status(500).json({ success: false, message: error.message || "Server Error" });
     }
 };
