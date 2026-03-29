@@ -5,20 +5,28 @@ import User from '../models/User.js';
 import sendEmail from './sendEmail.js';
 import logger from './logger.js';
 
+let isAlertSchedulerInitialized = false;
+
 const sendAlertEmails = async () => {
   logger.info("Running IPO Alert Email Scheduler...");
   try {
+    // Define a window for "today" + "tomorrow" based on server clock.
+    // Previous logic used tomorrow@00:00 as the upper bound, which excluded
+    // most "tomorrow" timestamps (e.g., tomorrow at 10:00).
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    const targetDate = new Date(today);
-    targetDate.setDate(targetDate.getDate() + 1); // Looking for IPOs opening or closing tomorrow
+    const startOfTomorrow = new Date(today);
+    startOfTomorrow.setDate(startOfTomorrow.getDate() + 1);
+
+    const endOfTomorrow = new Date(startOfTomorrow);
+    endOfTomorrow.setHours(23, 59, 59, 999);
 
     // Find IPOs opening or closing around the current date. For simplicity, let's find IPOs opening or closing in the next 2 days or today.
     const ipos = await IpoFull.find({
       $or: [
-        { 'dates.open': { $gte: today, $lte: targetDate } },
-        { 'dates.close': { $gte: today, $lte: targetDate } }
+        { 'dates.open': { $gte: today, $lte: endOfTomorrow } },
+        { 'dates.close': { $gte: today, $lte: endOfTomorrow } }
       ]
     });
 
@@ -31,16 +39,19 @@ const sendAlertEmails = async () => {
       let alertTypeStr = "";
       let actionText = "";
 
-      if (ipo.dates.open && new Date(ipo.dates.open).toDateString() === today.toDateString()) {
+      const openDate = ipo.dates?.open ? new Date(ipo.dates.open) : null;
+      const closeDate = ipo.dates?.close ? new Date(ipo.dates.close) : null;
+
+      if (openDate && openDate.toDateString() === today.toDateString()) {
         alertTypeStr = "Opens Today!";
         actionText = "The subscription window is now open. Don't miss out!";
-      } else if (ipo.dates.open && new Date(ipo.dates.open) > today && new Date(ipo.dates.open) <= targetDate) {
+      } else if (openDate && openDate >= startOfTomorrow && openDate <= endOfTomorrow) {
         alertTypeStr = "Opens Tomorrow!";
         actionText = "Get ready! The subscription window opens tomorrow.";
-      } else if (ipo.dates.close && new Date(ipo.dates.close).toDateString() === today.toDateString()) {
+      } else if (closeDate && closeDate.toDateString() === today.toDateString()) {
         alertTypeStr = "Closes Today!";
         actionText = "Last chance! The subscription window closes today.";
-      } else if (ipo.dates.close && new Date(ipo.dates.close) > today && new Date(ipo.dates.close) <= targetDate) {
+      } else if (closeDate && closeDate >= startOfTomorrow && closeDate <= endOfTomorrow) {
         alertTypeStr = "Closes Tomorrow!";
         actionText = "Warning! The subscription window closes tomorrow.";
       } else {
@@ -123,8 +134,18 @@ const sendAlertEmails = async () => {
 
 // Run every day at 09:00 AM
 export const initAlertScheduler = () => {
+  if (isAlertSchedulerInitialized) return;
+  isAlertSchedulerInitialized = true;
+
   logger.info("Initializing node-cron for IPO alerts...");
-  cron.schedule('0 9 * * *', () => {
-    sendAlertEmails();
-  });
+  cron.schedule(
+    '0 9 * * *',
+    () => {
+      // `sendAlertEmails` has its own try/catch, but we still call it async-safe.
+      void sendAlertEmails();
+    },
+    {
+      timezone: process.env.CRON_TIMEZONE || 'Asia/Kolkata',
+    }
+  );
 };

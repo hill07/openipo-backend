@@ -4,9 +4,13 @@ import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import logger from "../utils/logger.js";
 import Alert from "../models/Alert.js";
+import crypto from "crypto";
 
 const generateOTP = () => {
-    return Math.floor(100000 + Math.random() * 900000).toString();
+    // Use crypto-secure RNG to avoid predictable OTPs.
+    // Always return a 6-digit string (including leading zeros).
+    const otp = crypto.randomInt(0, 1000000);
+    return otp.toString().padStart(6, '0');
 };
 
 export const registerUser = async (req, res) => {
