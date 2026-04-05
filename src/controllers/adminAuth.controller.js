@@ -13,12 +13,19 @@ const generateToken = (res, adminId) => {
         expiresIn: '12h', // 12 hours session
     });
 
-    res.cookie('admin_token', token, {
+    const cookieOptions = {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
-        sameSite: 'strict',
-        maxAge: 12 * 60 * 60 * 1000, // 12h
-    });
+        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax', // Use 'none' for cross-site prod, 'lax' for local
+        maxAge: 12 * 60 * 60 * 1000,
+    };
+
+    // Only set domain in production to avoid issues with localhost
+    if (process.env.NODE_ENV === 'production') {
+        cookieOptions.domain = '.openipo.in';
+    }
+
+    res.cookie('admin_token', token, cookieOptions);
 };
 
 // @desc    Step 1: Login with Email & Password
@@ -107,15 +114,37 @@ export const verify2FA = async (req, res, next) => {
 
         // Decrypt secret
         if (!admin.twoFactorSecretEncrypted) return res.status(400).json({ message: "2FA not set up" });
-        const secret = decrypt(admin.twoFactorSecretEncrypted);
 
-        // Verify OTP
-        const isValid = authenticator.check(token, secret);
+        const enc = admin.twoFactorSecretEncrypted;
+        if (typeof enc !== 'string' || !enc.includes(':')) {
+            return res.status(400).json({ message: "Invalid 2FA secret storage; re-run 2FA setup." });
+        }
 
-        // Also check backup codes if OTP fails
+        const secret = decrypt(enc);
+        if (secret == null || typeof secret !== 'string' || !secret.trim()) {
+            return res.status(500).json({
+                message:
+                    'Could not decrypt 2FA secret. Set ENCRYPTION_KEY to exactly 32 ASCII characters in .env and restart the server. It must match the key used when 2FA was first enabled.',
+            });
+        }
+
+        const rawCode = String(token ?? '').replace(/\s/g, '');
+        if (!rawCode) {
+            return res.status(400).json({ message: 'Enter your 2FA code or a backup code.' });
+        }
+
+        // TOTP is 6 digits; backup codes are separate format
+        let isValid = false;
+        try {
+            isValid = /^\d{6}$/.test(rawCode) && authenticator.check(rawCode, secret);
+        } catch (otpErr) {
+            console.error("OTP check error in verify2FA:", otpErr.message);
+            return res.status(500).json({ message: "2FA verification failed internally. Please re-setup 2FA." });
+        }
+
         let usedBackup = false;
         if (!isValid) {
-            usedBackup = await admin.verifyBackupCode(token);
+            usedBackup = await admin.verifyBackupCode(rawCode);
         }
 
         if (isValid || usedBackup) {
@@ -143,10 +172,16 @@ export const verify2FA = async (req, res, next) => {
 // @desc    Logout
 // @route   POST /api/admin/auth/logout
 export const logout = async (req, res) => {
-    res.cookie('admin_token', '', {
+    const cookieOptions = {
         httpOnly: true,
         expires: new Date(0)
-    });
+    };
+
+    if (process.env.NODE_ENV === 'production') {
+        cookieOptions.domain = '.openipo.in';
+    }
+
+    res.cookie('admin_token', '', cookieOptions);
     if (req.admin) {
         await logAdminAction(req.admin._id, 'LOGOUT', req);
     }
@@ -238,10 +273,25 @@ export const confirm2FA = async (req, res, next) => {
         const admin = await Admin.findById(adminId).select('+twoFactorSecretEncrypted');
 
         // Decrypt
-        const secret = decrypt(admin.twoFactorSecretEncrypted);
+        if (!admin.twoFactorSecretEncrypted) {
+            return res.status(400).json({ message: "2FA secret not found. Please re-run 2FA setup." });
+        }
 
-        // Verify
-        const isValid = authenticator.check(token, secret);
+        const secret = decrypt(admin.twoFactorSecretEncrypted);
+        if (!secret || typeof secret !== 'string' || !secret.trim()) {
+            return res.status(500).json({
+                message: 'Could not decrypt 2FA secret. Ensure ENCRYPTION_KEY in .env is exactly 32 characters and matches the key used during 2FA setup.'
+            });
+        }
+
+        // Verify OTP
+        let isValid = false;
+        try {
+            isValid = authenticator.check(String(token ?? '').replace(/\s/g, ''), secret);
+        } catch (otpErr) {
+            console.error("OTP verification error:", otpErr.message);
+            return res.status(500).json({ message: "2FA verification failed internally. Please re-setup 2FA." });
+        }
 
         if (!isValid) return res.status(400).json({ message: "Invalid OTP" });
 

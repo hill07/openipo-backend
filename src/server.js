@@ -62,9 +62,10 @@ app.use(cors({
     if (
       origin.startsWith("http://localhost") ||
       origin.startsWith("http://127.0.0.1") ||
+      origin === "https://admin.openipo.in" || // Explicitly allow live subdomain
       origin.startsWith("http://10.") ||       // Private network 10.x.x.x
       origin.startsWith("http://192.168.") ||  // Private network 192.168.x.x
-      origin.startsWith("http://172.16.")      // Private network 172.16.x.x - 172.31.x.x (simplification)
+      origin.startsWith("http://172.16.")      // Private network 172.16.x.x - 172.31.x.x
     ) {
       return callback(null, true);
     }

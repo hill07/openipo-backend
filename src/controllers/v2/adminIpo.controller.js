@@ -46,7 +46,8 @@ export const createIpo = async (req, res, next) => {
         return responseHandler(res, 201, true, ipo, 'IPO Created Successfully');
     } catch (error) {
         if (error.name === 'ZodError') {
-            return res.status(400).json({ success: false, message: 'Validation Error', errors: error.errors });
+            const exactMsg = error.errors.map(e => e.message || e.msg || e).join(', ');
+            return res.status(400).json({ success: false, message: exactMsg, errors: error.errors });
         }
         next(error);
     }
@@ -159,7 +160,8 @@ export const updateIpo = async (req, res, next) => {
         console.error("Update IPO Error:", error);
         if (error.name === 'ZodError') {
             console.error("Zod Validation Errors:", JSON.stringify(error.errors, null, 2));
-            return res.status(400).json({ success: false, message: 'Validation Error', errors: error.errors });
+            const exactMsg = error.errors.map(e => e.message || e.msg || e).join(', ');
+            return res.status(400).json({ success: false, message: exactMsg, errors: error.errors });
         }
         next(error);
     }
