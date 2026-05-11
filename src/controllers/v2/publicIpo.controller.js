@@ -1,4 +1,5 @@
 import IpoFull from '../../models/IpoFull.js';
+import Settings from '../../models/Settings.js';
 import { responseHandler } from '../../utils/responseHandler.js';
 
 // @desc    Get Public IPOs
@@ -57,7 +58,15 @@ export const getIpo = async (req, res, next) => {
             return responseHandler(res, 404, false, null, 'IPO not found');
         }
 
-        return responseHandler(res, 200, true, ipo);
+        const settings = await Settings.findOne({ key: 'global' });
+        
+        const ipoObj = ipo.toObject();
+        if (settings && settings.showIpoGuru) {
+            if (!ipoObj.gmp) ipoObj.gmp = {};
+            ipoObj.gmp.isIpoGuru = true;
+        }
+
+        return responseHandler(res, 200, true, ipoObj);
     } catch (error) {
         next(error);
     }

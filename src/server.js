@@ -14,6 +14,7 @@ import connectDB from "./config/db.js";
 // V2 Imports
 import adminIpoRoutes from "./routes/v2/adminIpo.routes.js";
 import publicIpoRoutes from "./routes/v2/publicIpo.routes.js";
+import settingsRoutes from "./routes/v2/settings.routes.js";
 import visitorRoutes from "./routes/visitor.routes.js";
 
 // Admin Auth (Kept)
@@ -99,6 +100,9 @@ app.use("/api/v2/admin/ipos", adminIpoRoutes);
 
 // V2 Public IPOs
 app.use("/api/v2/ipos", publicIpoRoutes);
+
+// Settings
+app.use("/api/v2/settings", settingsRoutes);
 
 // Visitor Counter
 app.use("/api/public/visitors", visitorRoutes);

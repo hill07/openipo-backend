@@ -139,6 +139,7 @@ const ipoFullSchema = new mongoose.Schema({
         estListingPrice: Number,
         lastUpdatedAtText: String,
         source: String,
+        isIpoGuru: { type: Boolean, default: false },
         history: [gmpHistorySchema]
     },
 
