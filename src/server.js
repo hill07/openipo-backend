@@ -16,6 +16,7 @@ import adminIpoRoutes from "./routes/v2/adminIpo.routes.js";
 import publicIpoRoutes from "./routes/v2/publicIpo.routes.js";
 import settingsRoutes from "./routes/v2/settings.routes.js";
 import visitorRoutes from "./routes/visitor.routes.js";
+import adminVisitorRoutes from "./routes/v2/adminVisitor.routes.js";
 
 // Admin Auth (Kept)
 import adminAuthRoutes from "./routes/adminAuth.routes.js";
@@ -106,6 +107,9 @@ app.use("/api/v2/settings", settingsRoutes);
 
 // Visitor Counter
 app.use("/api/public/visitors", visitorRoutes);
+
+// Admin Visitor List
+app.use("/api/v2/admin/visitors", adminVisitorRoutes);
 
 // Error Handling
 app.use(notFoundMiddleware);

@@ -2,6 +2,7 @@ import express from 'express';
 import Settings from '../../models/Settings.js';
 import { responseHandler } from '../../utils/responseHandler.js';
 import { protectAdmin } from '../../middlewares/adminAuth.middleware.js';
+import { invalidateSettingsCache } from '../../utils/settingsCache.js';
 
 const router = express.Router();
 
@@ -25,14 +26,16 @@ router.get('/', async (req, res, next) => {
 // @access  Admin
 router.put('/', protectAdmin, async (req, res, next) => {
     try {
-        const { showIpoGuru } = req.body;
+        const { showIpoGuru, gmpSource, gmpSourceLink } = req.body;
         
         const settings = await Settings.findOneAndUpdate(
             { key: 'global' },
-            { showIpoGuru },
+            { showIpoGuru, gmpSource, gmpSourceLink },
             { new: true, upsert: true }
         );
-        
+
+        invalidateSettingsCache();
+
         return responseHandler(res, 200, true, settings);
     } catch (error) {
         next(error);

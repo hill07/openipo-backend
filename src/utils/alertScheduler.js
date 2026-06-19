@@ -58,11 +58,17 @@ const sendAlertEmails = async () => {
         continue; // Not matching our exact criteria
       }
 
-      // Find all alerts for this IPO
-      const alerts = await Alert.find({ ipoSlug: ipo.slug });
+      // Find all alerts for this IPO, then batch-fetch the users in one query
+      // (avoids an N+1: one User.findById per alert).
+      const alerts = await Alert.find({ ipoSlug: ipo.slug }).lean();
+      const userIds = [...new Set(alerts.map((a) => String(a.userId)))];
+      const users = await User.find({ _id: { $in: userIds } })
+        .select('name email')
+        .lean();
+      const userMap = new Map(users.map((u) => [String(u._id), u]));
 
       for (const alert of alerts) {
-        const user = await User.findById(alert.userId);
+        const user = userMap.get(String(alert.userId));
         if (!user) continue;
 
         // Stunning Email Template for Alert Me

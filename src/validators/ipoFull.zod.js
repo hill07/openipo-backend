@@ -94,11 +94,9 @@ const ipoFullSchema = z.object({
     // GMP
     gmp: z.object({
         current: numeric.default(0),
-        percent: numeric,
-        estListingPrice: numeric,
-        // trend: z.enum(['BULLISH', 'NEUTRAL', 'BEARISH']).optional(), // Removed by user
         lastUpdatedAtText: z.string().optional(),
         source: z.string().optional(),
+        sourceLink: z.string().optional(),
         history: z.array(z.object({
             date: dateSchema,
             gmp: numeric

@@ -59,7 +59,9 @@ export const createIpo = async (req, res, next) => {
 // @access  Private
 export const getAdminIpos = async (req, res, next) => {
     try {
-        const { page = 1, limit = 10, search, status, type, showDeleted } = req.query;
+        const { search, status, type, showDeleted } = req.query;
+        const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 10));
+        const page = Math.max(1, Number(req.query.page) || 1);
 
         const query = {};
 
@@ -72,21 +74,18 @@ export const getAdminIpos = async (req, res, next) => {
         if (status) query.status = status;
         if (type) query.type = type;
 
-        // Soft Delete Handling
-        if (showDeleted === 'true') {
-            // show all or specific logic? usually admins want to see active by default
-            // If showDeleted is true, we might show ONLY deleted or ALL? 
-            // Let's assume inclusive or separate filter. 
-            // Standard: default show isDeleted: false.
-        } else {
+        // Soft Delete Handling: default to active only. When showDeleted=true,
+        // include archived IPOs by leaving the isDeleted filter off.
+        if (showDeleted !== 'true') {
             query.isDeleted = false;
         }
 
         const count = await IpoFull.countDocuments(query);
         const ipos = await IpoFull.find(query)
             .sort({ createdAt: -1 })
-            .limit(Number(limit))
-            .skip((Number(page) - 1) * Number(limit));
+            .limit(limit)
+            .skip((page - 1) * limit)
+            .lean();
 
         return responseHandler(res, 200, true, { ipos, count, pages: Math.ceil(count / limit) });
     } catch (error) {
@@ -121,45 +120,58 @@ export const updateIpo = async (req, res, next) => {
             return responseHandler(res, 404, false, null, 'IPO not found');
         }
 
+        // 1. Zod Validation (Partial for updates)
         const validatedUpdates = ipoFullSchema.partial().parse(req.body);
 
-        console.log('[DEBUG] UpdateIPO payload financials:', JSON.stringify(req.body.financials, null, 2));
-        console.log('[DEBUG] ValidatedUpdates financials:', JSON.stringify(validatedUpdates.financials, null, 2));
+        // 2. Prepare data for derived calculations
+        // We use a plain object for calculations to avoid Mongoose-specific issues
+        const currentData = ipo.toObject();
+        const mergedData = { 
+            ...currentData, 
+            ...validatedUpdates,
+            // Ensure nested objects are also merged correctly if they exist in updates
+            gmp: validatedUpdates.gmp ? { ...currentData.gmp, ...validatedUpdates.gmp } : currentData.gmp,
+            subscription: validatedUpdates.subscription ? { ...currentData.subscription, ...validatedUpdates.subscription } : currentData.subscription,
+            dates: validatedUpdates.dates ? { ...currentData.dates, ...validatedUpdates.dates } : currentData.dates
+        };
 
-        // Compute Derived Fields (Merge with existing data to ensure dependency availability)
-        const mergedDoc = { ...ipo.toObject(), ...validatedUpdates };
-        computeDerivedFields(mergedDoc);
+        // 3. Compute Derived Fields on the merged data
+        computeDerivedFields(mergedData);
 
-        // Apply derived fields back to updates
-        validatedUpdates.status = mergedDoc.status;
-        validatedUpdates.minInvestment = mergedDoc.minInvestment;
-        if (mergedDoc.gmp) validatedUpdates.gmp = mergedDoc.gmp;
-        if (mergedDoc.reservations) validatedUpdates.reservations = mergedDoc.reservations;
-        if (mergedDoc.subscription) validatedUpdates.subscription = mergedDoc.subscription;
+        // 4. Update the validatedUpdates with calculated values
+        validatedUpdates.status = mergedData.status;
+        validatedUpdates.minInvestment = mergedData.minInvestment;
+        
+        // Only update nested objects if they were affected or intended to be updated
+        if (mergedData.gmp) validatedUpdates.gmp = mergedData.gmp;
+        if (mergedData.subscription) validatedUpdates.subscription = mergedData.subscription;
+        if (mergedData.reservations) validatedUpdates.reservations = mergedData.reservations;
 
-        // Update meta
-        validatedUpdates.updatedBy = req.admin._id;
-        validatedUpdates.updatedByEmail = req.admin.email;
+        // 5. Update meta
+        validatedUpdates.updatedBy = req.admin?._id;
+        validatedUpdates.updatedByEmail = req.admin?.email;
 
-        // Do Update
+        // 6. Perform the Update
         const updatedIpo = await IpoFull.findOneAndUpdate(
             { slug },
             { $set: validatedUpdates },
             { new: true, runValidators: true }
         );
 
-        await logAdminAction(req.admin._id, 'UPDATE_IPO', req, {
+        if (!updatedIpo) {
+             return responseHandler(res, 404, false, null, 'IPO not found during update');
+        }
+
+        // 7. Audit Log
+        await logAdminAction(req.admin?._id, 'UPDATE_IPO', req, {
             slug,
-            company: updatedIpo.companyName,
-            debugPayload: req.body.financials, // Log raw financials
-            debugValidated: validatedUpdates.financials // Log validated financials
+            company: updatedIpo.companyName
         });
 
         return responseHandler(res, 200, true, updatedIpo, 'IPO Updated Successfully');
     } catch (error) {
         console.error("Update IPO Error:", error);
         if (error.name === 'ZodError') {
-            console.error("Zod Validation Errors:", JSON.stringify(error.errors, null, 2));
             const exactMsg = error.errors.map(e => e.message || e.msg || e).join(', ');
             return res.status(400).json({ success: false, message: exactMsg, errors: error.errors });
         }
@@ -177,11 +189,16 @@ export const deleteIpo = async (req, res, next) => {
 
         if (!ipo) return responseHandler(res, 404, false, null, 'IPO not found');
 
-        await IpoFull.deleteOne({ _id: ipo._id });
+        // Soft delete: hide from public/admin lists but retain the record
+        // (matches the isDeleted/deletedAt design used across the codebase).
+        await IpoFull.updateOne(
+            { _id: ipo._id },
+            { $set: { isDeleted: true, deletedAt: new Date() } }
+        );
 
         await logAdminAction(req.admin._id, 'DELETE_IPO', req, { slug });
 
-        return responseHandler(res, 200, true, null, 'IPO Deleted Permanently');
+        return responseHandler(res, 200, true, null, 'IPO Archived Successfully');
     } catch (error) {
         next(error);
     }

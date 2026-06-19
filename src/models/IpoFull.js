@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import mongooseLeanVirtuals from "mongoose-lean-virtuals";
 
 /* ---------- Sub Schemas ---------- */
 
@@ -132,14 +133,11 @@ const ipoFullSchema = new mongoose.Schema({
     leadManagers: [String],
 
     /* ===== GMP ===== */
-
     gmp: {
         current: { type: Number, default: 0 },
-        percent: Number,
-        estListingPrice: Number,
         lastUpdatedAtText: String,
         source: String,
-        isIpoGuru: { type: Boolean, default: false },
+        sourceLink: String,
         history: [gmpHistorySchema]
     },
 
@@ -285,6 +283,16 @@ ipoFullSchema.virtual('subscription.totalApplied').get(function () {
     return this.subscription.categories.reduce((sum, c) => (c.enabled && c.appliedShares) ? sum + c.appliedShares : sum, 0);
 });
 
+ipoFullSchema.virtual('gmp.percent').get(function () {
+    if (!this.gmp || !this.gmp.current || !this.priceBand?.max) return 0;
+    return Number(((this.gmp.current / this.priceBand.max) * 100).toFixed(2));
+});
+
+ipoFullSchema.virtual('gmp.estListingPrice').get(function () {
+    if (!this.gmp || !this.priceBand?.max) return 0;
+    return this.priceBand.max + (this.gmp.current || 0);
+});
+
 /* Text Index */
 
 ipoFullSchema.index({
@@ -292,5 +300,12 @@ ipoFullSchema.index({
     "symbol.nse": "text",
     "symbol.bse": "text"
 });
+
+/* Indexes for the actual sort/filter keys used by the public + admin lists */
+ipoFullSchema.index({ createdAt: -1 });
+ipoFullSchema.index({ isPublished: 1, isDeleted: 1, "dates.open": -1 });
+
+/* Enable virtuals on .lean({ virtuals: true }) reads */
+ipoFullSchema.plugin(mongooseLeanVirtuals);
 
 export default mongoose.model("IpoFull", ipoFullSchema);

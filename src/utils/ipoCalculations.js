@@ -43,17 +43,10 @@ export const computeDerivedFields = (ipoDoc) => {
     }
 
     // 3. GMP Derived
-    const gmpCurrent = Number(ipoDoc.gmp?.current || 0);
-
-    if (ipoDoc.gmp) {
-        if (!isNaN(maxPrice) && maxPrice > 0) {
-            ipoDoc.gmp.percent = Number(((gmpCurrent / maxPrice) * 100).toFixed(2));
-            ipoDoc.gmp.estListingPrice = maxPrice + gmpCurrent;
-        } else {
-            ipoDoc.gmp.percent = null;
-            ipoDoc.gmp.estListingPrice = null;
-        }
-    }
+    // Handled by virtuals in the schema for backend, but we keep it here for any manual usage?
+    // Actually, if we remove it from schema, we don't need to compute it here in place.
+    // However, if we want to return it in the object before saving, we can.
+    // The user said "i want this only nothing else" in the schema.
 
     // 4. Reservation Percentages
     if (Array.isArray(ipoDoc.reservations) && ipoDoc.reservations.length > 0) {
