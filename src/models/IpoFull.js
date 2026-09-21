@@ -136,8 +136,6 @@ const ipoFullSchema = new mongoose.Schema({
     gmp: {
         current: { type: Number, default: 0 },
         lastUpdatedAtText: String,
-        source: String,
-        sourceLink: String,
         history: [gmpHistorySchema]
     },
 

@@ -95,8 +95,6 @@ const ipoFullSchema = z.object({
     gmp: z.object({
         current: numeric.default(0),
         lastUpdatedAtText: z.string().optional(),
-        source: z.string().optional(),
-        sourceLink: z.string().optional(),
         history: z.array(z.object({
             date: dateSchema,
             gmp: numeric
