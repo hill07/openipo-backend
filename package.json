@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "nodemon src/server.js",
     "start": "node src/server.js",
-    "seed:amagi": "node src/seed/seedAmagi.js"
+    "seed:amagi": "node src/seed/seedAmagi.js",
+    "refresh:subscription": "node src/scripts/refreshSubscription.js"
   },
   "dependencies": {
     "bcrypt": "^6.0.0",

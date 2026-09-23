@@ -27,11 +27,13 @@ import { errorHandler } from "./middlewares/errorHandler.js";
 
 import logger from './utils/logger.js';
 import { initAlertScheduler } from './utils/alertScheduler.js';
+import { initSubscriptionScheduler } from './utils/subscriptionScheduler.js';
 
 dotenv.config();
 await connectDB();
 
 initAlertScheduler();
+initSubscriptionScheduler();
 
 const app = express();
 app.disable("x-powered-by");

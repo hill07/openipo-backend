@@ -7,7 +7,12 @@ import dotenv from "dotenv";
 dotenv.config();
 
 const API_URL = "https://www.ipoguru.in/api/v1/ipos";
-const API_KEY = process.env.IPOGURU_API_KEY || "ipo_aqaPRjr3VHJmzwuqB7XZZZMJgLyQeJpzjgODecTs";
+// Never hardcode the key — this one leaked into git history and must be rotated.
+const API_KEY = process.env.IPOGURU_API_KEY;
+if (!API_KEY) {
+    console.error("IPOGURU_API_KEY is not set (add it to openipo-backend/.env).");
+    process.exit(1);
+}
 
 // Static data fallback from user request
 const staticData = {
