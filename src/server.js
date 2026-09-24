@@ -79,12 +79,32 @@ app.use(cors({
   credentials: true
 }));
 
-// global rate limiter (light)
+// Global rate limiter for writes, auth and admin.
+//
+// Public IPO reads are exempt and get their own, far larger budget below: the
+// website renders server-side, so every visitor AND every search-engine crawler
+// arrives from the same handful of Vercel IPs and shares one counter. At 300/min
+// a Googlebot crawl of ~850 URLs exhausted the budget, the 429s reached
+// getServerSideProps, and the site served hard 404s for pages that exist.
+const isPublicIpoRead = (req) =>
+  req.method === 'GET' && req.path.startsWith('/api/v2/ipos');
+
 app.use(rateLimit({
   windowMs: 60 * 1000,
   limit: 300,
   standardHeaders: true,
-  legacyHeaders: false
+  legacyHeaders: false,
+  skip: isPublicIpoRead
+}));
+
+// Public IPO reads: generous, because one crawled page can mean several calls.
+// Still capped so a runaway client cannot take the API down.
+app.use('/api/v2/ipos', rateLimit({
+  windowMs: 60 * 1000,
+  limit: Number(process.env.PUBLIC_READ_RATE_LIMIT) || 3000,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: (req) => req.method !== 'GET'
 }));
 
 app.get("/", (req, res) => res.send("✅ OpenIPO V2 Backend Running"));
