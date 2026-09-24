@@ -30,6 +30,13 @@ const JOBS = {
     // Publishes IPOs that exist in the market but not in our database. Without it the
     // refresh jobs have nothing to update and a new issue never appears on the site.
     discover: () => discoverIpos({ apply: true }),
+    // Everything a live IPO page shows, in one call. Each half takes its own lock, so
+    // a scheduled subscription run already in flight is skipped rather than duplicated.
+    all: async () => {
+        const subscription = await withJobLock('subscription', () => refreshSubscriptions({ apply: true }));
+        const gmp = await withJobLock('gmp', () => refreshGmp({ apply: true }));
+        return { combined: { subscription, gmp } };
+    },
 };
 
 /** Constant-time compare so the token cannot be guessed a character at a time. */
@@ -42,6 +49,13 @@ function tokenMatches(provided) {
 }
 
 function summarize(job, report) {
+    if (job === 'all') {
+        const part = (name, run) =>
+            run.skipped
+                ? `${name} skipped (already running)`
+                : `${name} updated ${run.result.report.updated.length}`;
+        return `${part('subscription', report.combined.subscription)}, ${part('gmp', report.combined.gmp)}`;
+    }
     if (job === 'discover') {
         const names = report.created.map((c) => c.name).join('; ');
         return `published ${report.created.length}${names ? ` (${names})` : ''}, ${report.drifted.length} drifted, ${report.skipped.length} skipped`;
