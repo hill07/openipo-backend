@@ -24,12 +24,21 @@ const subscriptionCategorySchema = new mongoose.Schema({
     enabled: { type: Boolean, default: true },
     category: String,
     sharesOffered: Number,
-    appliedShares: Number
+    appliedShares: Number,
+    // Some issues (BSE SME especially) are only ever published as a MULTIPLE, with no
+    // share counts anywhere: the exchange reports 0 offered and we hold no prospectus
+    // reservation. Storing the reported multiple lets those IPOs show a correct, real
+    // subscription figure instead of nothing, while Offered/Bids stay blank because we
+    // genuinely do not know them.
+    timesReported: Number,
+    // Set on a breakdown row (sNII / bNII sit under NII). Sub-rows are displayed but
+    // excluded from every total, or the parent's shares would be counted twice.
+    parent: String
 }, { toJSON: { virtuals: true }, toObject: { virtuals: true } });
 
 subscriptionCategorySchema.virtual('times').get(function () {
-    if (!this.sharesOffered || !this.appliedShares) return 0;
-    return this.appliedShares / this.sharesOffered;
+    if (this.sharesOffered && this.appliedShares) return this.appliedShares / this.sharesOffered;
+    return this.timesReported || 0;
 });
 
 const reservationSchema = new mongoose.Schema({
@@ -144,6 +153,9 @@ const ipoFullSchema = new mongoose.Schema({
     subscription: {
         updatedAtText: String,
         source: String,
+
+        // Overall multiple as published, for issues where no share counts exist.
+        totalTimesReported: Number,
 
         days: [subscriptionDaySchema],
 
@@ -264,21 +276,23 @@ ipoFullSchema.virtual('subscription.totalTimes').get(function () {
     if (!this.subscription || !this.subscription.categories) return 0;
 
     // Sum enabled categories
-    const totalOffered = this.subscription.categories.reduce((sum, c) => (c.enabled && c.sharesOffered) ? sum + c.sharesOffered : sum, 0);
-    const totalApplied = this.subscription.categories.reduce((sum, c) => (c.enabled && c.appliedShares) ? sum + c.appliedShares : sum, 0);
+    const totalOffered = this.subscription.categories.reduce((sum, c) => (c.enabled && !c.parent && c.sharesOffered) ? sum + c.sharesOffered : sum, 0);
+    const totalApplied = this.subscription.categories.reduce((sum, c) => (c.enabled && !c.parent && c.appliedShares) ? sum + c.appliedShares : sum, 0);
 
-    if (!totalOffered) return 0;
+    // No share counts anywhere: fall back to the overall multiple as published.
+    // Never average the category multiples — they are weighted by reservation size.
+    if (!totalOffered) return this.subscription.totalTimesReported || 0;
     return totalApplied / totalOffered;
 });
 
 ipoFullSchema.virtual('subscription.totalOffered').get(function () {
     if (!this.subscription || !this.subscription.categories) return 0;
-    return this.subscription.categories.reduce((sum, c) => (c.enabled && c.sharesOffered) ? sum + c.sharesOffered : sum, 0);
+    return this.subscription.categories.reduce((sum, c) => (c.enabled && !c.parent && c.sharesOffered) ? sum + c.sharesOffered : sum, 0);
 });
 
 ipoFullSchema.virtual('subscription.totalApplied').get(function () {
     if (!this.subscription || !this.subscription.categories) return 0;
-    return this.subscription.categories.reduce((sum, c) => (c.enabled && c.appliedShares) ? sum + c.appliedShares : sum, 0);
+    return this.subscription.categories.reduce((sum, c) => (c.enabled && !c.parent && c.appliedShares) ? sum + c.appliedShares : sum, 0);
 });
 
 ipoFullSchema.virtual('gmp.percent').get(function () {

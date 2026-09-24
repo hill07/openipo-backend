@@ -81,6 +81,14 @@ export const computeDerivedFields = (ipoDoc) => {
                 // Skip Market Maker for Subscription Totals
                 if (cat.category === 'MarketMaker') return;
 
+                // sNII / bNII are a breakdown of NII; counting them as well would
+                // double the non-institutional portion in every total.
+                if (cat.parent) {
+                    const offered = Number(cat.sharesOffered) || 0;
+                    cat.times = offered > 0 ? Number(((Number(cat.appliedShares) || 0) / offered).toFixed(2)) : 0;
+                    return;
+                }
+
                 const offered = Number(cat.sharesOffered) || 0;
                 const applied = Number(cat.appliedShares) || 0;
                 let effectiveOffered = offered;

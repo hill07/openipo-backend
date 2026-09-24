@@ -107,10 +107,13 @@ const ipoFullSchema = z.object({
             enabled: z.boolean().default(true).optional(),
             category: z.string().optional(),
             sharesOffered: numeric,
-            appliedShares: numeric
+            appliedShares: numeric,
+            timesReported: numeric,
+            parent: z.string().optional()
         })).optional(),
 
         // Totals (Backend Calculated)
+        totalTimesReported: numeric,
         totalTimes: numeric,
         totalOffered: numeric,
         totalApplied: numeric,

@@ -61,6 +61,8 @@ function mapCategory(label) {
 /** Aliases so an NII row lands on a record that calls the same category HNI. */
 const ALIASES = {
     NII: ['NII', 'HNI', 'NII/HNI'],
+    bNII: ['bNII', 'BNII', 'HNI 10+'],
+    sNII: ['sNII', 'SNII', 'HNI 2+'],
     QIB: ['QIB'],
     Retail: ['Retail', 'RII'],
     Employee: ['Employee', 'Employees'],
@@ -112,7 +114,22 @@ function parseActiveCat(detail) {
             out.totalBid = num(row.noOfSharesBid);
             continue;
         }
-        if (!/^\d+$/.test(srNo)) continue; // "2.1", "1(a)" etc. are breakdowns of a parent row
+        // "1(a)", "2.1(b)" are lettered breakdowns with no offered figure — skip those.
+        // "2.1" / "2.2" ARE meaningful: the exchange's own bNII / sNII split.
+        const isTop = /^\d+$/.test(srNo);
+        const isNiiSplit = srNo === '2.1' || srNo === '2.2';
+        if (!isTop && !isNiiSplit) continue;
+
+        if (isNiiSplit) {
+            // 2.1 = bids above Rs 10 lakh (bNII), 2.2 = Rs 2-10 lakh (sNII).
+            out.categories.set(srNo === '2.1' ? 'bNII' : 'sNII', {
+                label,
+                bid: num(row.noOfSharesBid),
+                offered: num(row.noOfShareOffered),
+                parent: 'NII',
+            });
+            continue;
+        }
 
         const category = mapCategory(label);
         if (!category) continue;
@@ -239,12 +256,15 @@ export async function refreshSubscriptions({ apply = false, closedWithinDays = 2
                     category,
                     sharesOffered: row.offered,
                     appliedShares: row.bid,
+                    ...(row.parent ? { parent: row.parent } : {}),
                 });
                 changes.push(
                     `${category}: added from NSE — ${row.bid.toLocaleString('en-IN')} bid of ${row.offered.toLocaleString('en-IN')} offered`
                 );
                 continue;
             }
+
+            if (row.parent && !target.parent) target.parent = row.parent;
 
             const prevApplied = Number(target.appliedShares) || 0;
             if (prevApplied !== row.bid) {
@@ -317,9 +337,9 @@ function fromDmy(value) {
 }
 
 const TIMES_COLUMNS = [
-    { column: 'QIB', aliases: ['QIB'] },
-    { column: 'NII', aliases: ['NII', 'HNI'] },
-    { column: 'RII', aliases: ['Retail', 'RII'] },
+    { column: 'QIB', aliases: ['QIB'], canonical: 'QIB' },
+    { column: 'NII', aliases: ['NII', 'HNI'], canonical: 'NII' },
+    { column: 'RII', aliases: ['Retail', 'RII'], canonical: 'Retail' },
 ];
 
 async function refreshBseSme({ docs, byName, report, backup, apply, today }) {
@@ -377,32 +397,58 @@ async function refreshBseSme({ docs, byName, report, backup, apply, today }) {
             }
         }
 
-        for (const { column, aliases } of TIMES_COLUMNS) {
+        for (const { column, aliases, canonical } of TIMES_COLUMNS) {
             const times = Number(stripHtml(row[column]));
             if (!Number.isFinite(times) || times <= 0) continue;
 
             const lower = aliases.map((a) => a.toLowerCase());
-            const target = doc.subscription.categories.find((c) =>
+            let target = doc.subscription.categories.find((c) =>
                 lower.includes(String(c.category || '').toLowerCase())
             );
-            if (!target || !Number(target.sharesOffered)) continue;
 
-            const applied = Math.round(times * Number(target.sharesOffered));
-            if (Number(target.appliedShares) === applied) continue;
-            target.appliedShares = applied;
-            changes.push(`${target.category}: ${times}x of the reserved portion`);
+            // No row for this category yet: carry the published multiple on its own.
+            // push() stores a COPY as a subdocument, so re-read it — mutating the plain
+            // object we passed in would be silently discarded on save.
+            if (!target) {
+                doc.subscription.categories.push({
+                    enabled: true,
+                    category: canonical,
+                    sharesOffered: 0,
+                    appliedShares: 0,
+                });
+                target = doc.subscription.categories[doc.subscription.categories.length - 1];
+            }
+
+            if (Number(target.sharesOffered)) {
+                // We know the reserved portion, so the bid count can be reconstructed.
+                const applied = Math.round(times * Number(target.sharesOffered));
+                if (Number(target.appliedShares) === applied) continue;
+                target.appliedShares = applied;
+                changes.push(`${target.category}: ${times}x of the reserved portion`);
+            } else {
+                // No reservation anywhere: store the multiple as published and leave the
+                // share columns empty rather than inventing numbers to fill them.
+                if (Number(target.timesReported) === times) continue;
+                target.timesReported = times;
+                changes.push(`${target.category}: ${times}x (as published, no share counts available)`);
+            }
+        }
+
+        // The overall multiple, for issues that have no share counts to total up.
+        const totalReported = Number(stripHtml(row.Total).replace(/[^\d.].*$/, ''));
+        if (Number.isFinite(totalReported) && totalReported > 0) {
+            if (Number(doc.subscription.totalTimesReported) !== totalReported) {
+                doc.subscription.totalTimesReported = totalReported;
+                if (!doc.subscription.categories.some((c) => Number(c.sharesOffered))) {
+                    changes.push(`overall ${totalReported}x (as published)`);
+                }
+            }
         }
 
         if (!changes.length) {
             // Nothing writable: without a prospectus reservation there is no denominator
             // to turn "0.4x" back into a bid count, so say so rather than look idle.
-            if (!doc.subscription.categories.some((c) => Number(c.sharesOffered))) {
-                report.skippedRows.push(
-                    `${doc.companyName}: BSE feed has figures but our record holds no reservation to measure them against`
-                );
-            } else {
-                report.unchanged.push(doc.companyName);
-            }
+            report.unchanged.push(doc.companyName);
             continue;
         }
 

@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import express from 'express';
 import { refreshSubscriptions } from '../utils/subscriptionRefresh.js';
 import { refreshGmp } from '../utils/gmpRefresh.js';
+import { auditIpoData } from '../utils/subscriptionAudit.js';
 import { isRunning, withJobLock } from '../utils/jobLock.js';
 import logger from '../utils/logger.js';
 
@@ -79,6 +80,25 @@ router.all('/refresh/:job', (req, res) => {
         .catch((error) => {
             logger.error(`[refresh:${job}] failed: ${error.message}`);
         });
+});
+
+/**
+ * Data health check. Answers 409 when a live IPO is showing nothing to readers or is
+ * missing a price band, so an external scheduler's "notify on failure" becomes a real
+ * alert instead of a fault sitting in a log nobody reads.
+ */
+router.all('/audit', async (req, res) => {
+    const provided = req.get('x-refresh-token') || req.query.token;
+    if (!tokenMatches(provided)) return res.status(401).json({ ok: false, error: 'unauthorized' });
+
+    try {
+        const result = await auditIpoData();
+        for (const p of result.problems) logger.warn(`[audit] ${p}`);
+        return res.status(result.healthy ? 200 : 409).json(result);
+    } catch (error) {
+        logger.error(`[audit] failed: ${error.message}`);
+        return res.status(500).json({ ok: false, error: error.message });
+    }
 });
 
 /**
