@@ -1,6 +1,7 @@
 import cron from 'node-cron';
 import { refreshSubscriptions } from './subscriptionRefresh.js';
 import { refreshGmp } from './gmpRefresh.js';
+import { withJobLock } from './jobLock.js';
 import logger from './logger.js';
 
 let initialized = false;
@@ -24,7 +25,9 @@ const GMP_CRON = '*/30 9-22 * * *';
 
 async function runGmp(label) {
     try {
-        const { report } = await refreshGmp({ apply: true });
+        const run = await withJobLock('gmp', () => refreshGmp({ apply: true }));
+        if (run.skipped) return logger.info(`[gmp:${label}] skipped — a refresh is already running`);
+        const { report } = run.result;
         if (report.updated.length) {
             logger.info(
                 `[gmp:${label}] updated ${report.updated.length}: ${report.updated
@@ -42,7 +45,9 @@ async function runGmp(label) {
 
 async function runOnce(label) {
     try {
-        const { report } = await refreshSubscriptions({ apply: true });
+        const run = await withJobLock('subscription', () => refreshSubscriptions({ apply: true }));
+        if (run.skipped) return logger.info(`[subscription:${label}] skipped — a refresh is already running`);
+        const { report } = run.result;
         if (report.updated.length) {
             logger.info(
                 `[subscription:${label}] updated ${report.updated.length}/${report.activeIssues} live issues: ${report.updated

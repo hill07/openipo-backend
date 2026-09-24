@@ -108,6 +108,7 @@ export async function refreshGmp({ apply = false } = {}) {
         priceMismatch: [],
         implausible: [],
         noQuote: [],
+        saveFailed: [],
         unmatched: [],
     };
     const backup = [];
@@ -168,7 +169,13 @@ export async function refreshGmp({ apply = false } = {}) {
             percent: ourPrice ? Number(((next / ourPrice) * 100).toFixed(2)) : null,
         });
 
-        if (apply) await doc.save();
+        if (apply) {
+            try {
+                await doc.save();
+            } catch (error) {
+                report.saveFailed.push(`${doc.companyName}: ${error.message}`);
+            }
+        }
     }
 
     return { report, backup };

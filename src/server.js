@@ -15,6 +15,7 @@ import connectDB from "./config/db.js";
 import adminIpoRoutes from "./routes/v2/adminIpo.routes.js";
 import publicIpoRoutes from "./routes/v2/publicIpo.routes.js";
 import visitorRoutes from "./routes/visitor.routes.js";
+import internalRoutes from "./routes/internal.routes.js";
 import adminVisitorRoutes from "./routes/v2/adminVisitor.routes.js";
 
 // Admin Auth (Kept)
@@ -125,6 +126,9 @@ app.use("/api/v2/ipos", publicIpoRoutes);
 
 // Visitor Counter
 app.use("/api/public/visitors", visitorRoutes);
+
+// Refresh triggers for the external scheduler (token protected)
+app.use("/api/internal", internalRoutes);
 
 // Admin Visitor List
 app.use("/api/v2/admin/visitors", adminVisitorRoutes);

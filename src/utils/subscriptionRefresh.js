@@ -294,7 +294,14 @@ export async function refreshSubscriptions({ apply = false, closedWithinDays = 2
         });
         backup.push({ slug: doc.slug, subscription: { categories: before } });
 
-        if (apply) await doc.save();
+        if (apply) {
+            // One conflicted document must not abandon the rest of the pass.
+            try {
+                await doc.save();
+            } catch (error) {
+                report.errors.push(`${doc.companyName}: save failed — ${error.message}`);
+            }
+        }
     }
 
     // Second pass: BSE SME issues, which the NSE feed does not carry at all.
@@ -411,7 +418,14 @@ async function refreshBseSme({ docs, byName, report, backup, apply, today }) {
         });
         backup.push({ slug: doc.slug, subscription: { categories: before } });
 
-        if (apply) await doc.save();
+        if (apply) {
+            // One conflicted document must not abandon the rest of the pass.
+            try {
+                await doc.save();
+            } catch (error) {
+                report.errors.push(`${doc.companyName}: save failed — ${error.message}`);
+            }
+        }
     }
 }
 
