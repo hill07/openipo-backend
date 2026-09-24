@@ -21,6 +21,19 @@
  */
 import IpoFull from '../models/IpoFull.js';
 import { computeDerivedFields } from './ipoCalculations.js';
+import { fetchReport, stripHtml } from './reportFeed.js';
+
+/**
+ * BSE SME issues do not appear in the NSE's api/ipo-current-issue feed at all —
+ * on a typical day that left 7 of our 17 open IPOs with no subscription figures.
+ * This second pass covers exactly those, from a public report of BSE bid data.
+ *
+ * It reports subscription as MULTIPLES rather than share counts, so the applied
+ * shares are reconstructed as times x our prospectus reservation. The ratio the
+ * site shows is therefore the published one; only the absolute bid count is
+ * derived, and it is never written for a category we hold no reservation for.
+ */
+const BSE_SUB_REPORT = 333;
 
 const UA =
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36';
@@ -284,5 +297,132 @@ export async function refreshSubscriptions({ apply = false, closedWithinDays = 2
         if (apply) await doc.save();
     }
 
+    // Second pass: BSE SME issues, which the NSE feed does not carry at all.
+    await refreshBseSme({ docs, byName, report, backup, apply, today });
+
     return { report, backup };
+}
+
+/** "24-09-2026" -> "2026-09-24"; anything else -> null. */
+function fromDmy(value) {
+    const m = String(value || '').match(/^(\d{2})-(\d{2})-(\d{4})$/);
+    return m ? `${m[3]}-${m[2]}-${m[1]}` : null;
+}
+
+const TIMES_COLUMNS = [
+    { column: 'QIB', aliases: ['QIB'] },
+    { column: 'NII', aliases: ['NII', 'HNI'] },
+    { column: 'RII', aliases: ['Retail', 'RII'] },
+];
+
+async function refreshBseSme({ docs, byName, report, backup, apply, today }) {
+    let rows;
+    try {
+        rows = await fetchReport(BSE_SUB_REPORT);
+    } catch (error) {
+        report.errors.push(`BSE SME feed: ${error.message}`);
+        return;
+    }
+
+    const handled = new Set(report.updated.map((u) => u.slug));
+
+    for (const row of rows) {
+        const name = stripHtml(row.Name).replace(/\s*(BSE|NSE)\s*SME.*$/i, '').trim();
+        const doc = byName.get(nameKey(name));
+        if (!doc || handled.has(doc.slug)) continue;
+
+        // The exchange feed is authoritative where it exists; only fill the gap.
+        if (String(doc.subscription?.source || '') === 'NSE' && doc.subscription?.categories?.length) {
+            const anyBids = doc.subscription.categories.some((c) => Number(c.appliedShares));
+            if (anyBids) continue;
+        }
+
+        // Guard against a name collision: the closing date must agree.
+        const rowClose = fromDmy(stripHtml(row['Closing Date']));
+        const ourClose = doc.dates?.close ? istDay(doc.dates.close) : null;
+        if (!rowClose || !ourClose || rowClose !== ourClose) {
+            report.skippedRows.push(
+                `${doc.companyName}: BSE feed closing date ${rowClose || '?'} != our ${ourClose || '?'} — skipped`
+            );
+            continue;
+        }
+
+        const status = statusOf(doc, today);
+        if (status === 'future' || status === 'stale') continue;
+
+        if (!Array.isArray(doc.subscription?.categories)) doc.subscription = { categories: [] };
+        const before = JSON.parse(JSON.stringify(doc.subscription.categories || []));
+        const changes = [];
+
+        if (!doc.subscription.categories.length && doc.reservations?.length) {
+            for (const res of doc.reservations) {
+                if (res.enabled === false) continue;
+                if (['Anchor', 'MarketMaker'].includes(res.category)) continue;
+                doc.subscription.categories.push({
+                    enabled: true,
+                    category: res.category,
+                    sharesOffered: Number(res.sharesOffered) || 0,
+                    appliedShares: 0,
+                });
+            }
+            if (doc.subscription.categories.length) {
+                changes.push(`seeded ${doc.subscription.categories.length} categories from the prospectus reservations`);
+            }
+        }
+
+        for (const { column, aliases } of TIMES_COLUMNS) {
+            const times = Number(stripHtml(row[column]));
+            if (!Number.isFinite(times) || times <= 0) continue;
+
+            const lower = aliases.map((a) => a.toLowerCase());
+            const target = doc.subscription.categories.find((c) =>
+                lower.includes(String(c.category || '').toLowerCase())
+            );
+            if (!target || !Number(target.sharesOffered)) continue;
+
+            const applied = Math.round(times * Number(target.sharesOffered));
+            if (Number(target.appliedShares) === applied) continue;
+            target.appliedShares = applied;
+            changes.push(`${target.category}: ${times}x of the reserved portion`);
+        }
+
+        if (!changes.length) {
+            // Nothing writable: without a prospectus reservation there is no denominator
+            // to turn "0.4x" back into a bid count, so say so rather than look idle.
+            if (!doc.subscription.categories.some((c) => Number(c.sharesOffered))) {
+                report.skippedRows.push(
+                    `${doc.companyName}: BSE feed has figures but our record holds no reservation to measure them against`
+                );
+            } else {
+                report.unchanged.push(doc.companyName);
+            }
+            continue;
+        }
+
+        doc.subscription.source = 'BSE';
+        doc.subscription.updatedAtText = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
+        computeDerivedFields(doc);
+
+        report.updated.push({
+            name: `${doc.companyName} (BSE SME)`,
+            slug: doc.slug,
+            total: doc.subscription.totalTimes,
+            changes,
+        });
+        backup.push({ slug: doc.slug, subscription: { categories: before } });
+
+        if (apply) await doc.save();
+    }
+}
+
+/** open / recent (worth refreshing) vs future / stale (not). */
+function statusOf(doc, today) {
+    const open = doc.dates?.open ? istDay(doc.dates.open) : null;
+    const close = doc.dates?.close ? istDay(doc.dates.close) : null;
+    if (open && today < open) return 'future';
+    if (close && today > close) {
+        const age = Math.round((new Date(today) - new Date(close)) / 86400000);
+        return age > 2 ? 'stale' : 'recent';
+    }
+    return 'open';
 }

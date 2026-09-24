@@ -3,3 +3,6 @@ node_modules
 dist
 build
 npm-debug.log*
+
+# Rollback snapshots written by the refresh scripts
+*-backup-*.json

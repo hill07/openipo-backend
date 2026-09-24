@@ -1,5 +1,6 @@
 import cron from 'node-cron';
 import { refreshSubscriptions } from './subscriptionRefresh.js';
+import { refreshGmp } from './gmpRefresh.js';
 import logger from './logger.js';
 
 let initialized = false;
@@ -18,6 +19,26 @@ let initialized = false;
  */
 const DEFAULT_CRON = '*/15 10-17 * * *';
 const CATCHUP_CRON = '0 19 * * *';
+// GMP is quoted from morning until late evening, so a wider window than bidding hours.
+const GMP_CRON = '*/30 9-22 * * *';
+
+async function runGmp(label) {
+    try {
+        const { report } = await refreshGmp({ apply: true });
+        if (report.updated.length) {
+            logger.info(
+                `[gmp:${label}] updated ${report.updated.length}: ${report.updated
+                    .map((u) => `${u.name} ₹${u.to}`)
+                    .join('; ')}`
+            );
+        } else {
+            logger.info(`[gmp:${label}] no changes (${report.sourceRows} unlisted IPOs at source)`);
+        }
+        for (const m of [...report.priceMismatch, ...report.implausible]) logger.warn(`[gmp:${label}] ${m}`);
+    } catch (error) {
+        logger.error(`[gmp:${label}] refresh failed: ${error.message}`);
+    }
+}
 
 async function runOnce(label) {
     try {
@@ -54,4 +75,10 @@ export const initSubscriptionScheduler = () => {
     logger.info(`Initializing NSE subscription refresh (${schedule}, ${timezone}).`);
     cron.schedule(schedule, () => void runOnce('live'), { timezone });
     cron.schedule(CATCHUP_CRON, () => void runOnce('eod'), { timezone });
+
+    // GMP moves all day and into the evening, well outside exchange bidding hours,
+    // so it runs on its own wider window.
+    const gmpSchedule = process.env.GMP_REFRESH_CRON || GMP_CRON;
+    logger.info(`Initializing GMP refresh (${gmpSchedule}, ${timezone}).`);
+    cron.schedule(gmpSchedule, () => void runGmp('live'), { timezone });
 };
