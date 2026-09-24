@@ -81,7 +81,11 @@ router.all('/refresh/:job', (req, res) => {
         });
 });
 
-/** Cheap liveness ping, useful as a keep-alive target. */
-router.get('/ping', (_req, res) => res.json({ ok: true, at: new Date().toISOString() }));
+/**
+ * Cheap liveness ping, useful as a keep-alive target. Answers any method: an
+ * external scheduler set to POST would otherwise get a confusing 404 from a
+ * GET-only route, which looks like a failed deploy rather than a wrong verb.
+ */
+router.all('/ping', (_req, res) => res.json({ ok: true, at: new Date().toISOString() }));
 
 export default router;
