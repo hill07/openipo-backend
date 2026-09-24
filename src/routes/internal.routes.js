@@ -24,6 +24,9 @@ import logger from '../utils/logger.js';
  */
 const router = express.Router();
 
+/** Last completed run of each job, so a fire-and-forget trigger can be checked later. */
+const lastRun = {};
+
 const JOBS = {
     subscription: () => refreshSubscriptions({ apply: true }),
     gmp: () => refreshGmp({ apply: true }),
@@ -66,7 +69,7 @@ function summarize(job, report) {
     return `updated ${report.updated.length}, unchanged ${report.unchanged.length}, errors ${report.errors.length}`;
 }
 
-router.all('/refresh/:job', (req, res) => {
+router.all('/refresh/:job', async (req, res) => {
     const { job } = req.params;
 
     if (!process.env.REFRESH_TOKEN) {
@@ -89,21 +92,77 @@ router.all('/refresh/:job', (req, res) => {
 
     const startedAt = Date.now();
 
+    // ?wait=1 holds the connection until the job finishes and returns the summary.
+    // It is for a person running this by hand: a full pass takes 15-20s, well past a
+    // scheduler's response timeout, which is why the default answers immediately.
+    const wait = ['1', 'true', 'yes'].includes(String(req.query.wait || '').toLowerCase());
+
+    const finish = (run) => {
+        const seconds = Math.round((Date.now() - startedAt) / 1000);
+        if (run.skipped) {
+            logger.info(`[refresh:${job}] skipped — already running`);
+            return { ok: false, job, skipped: true, reason: 'already running', seconds };
+        }
+        const report = run.result.report || run.result;
+        const summary = summarize(job, report);
+        logger.info(`[refresh:${job}] done in ${seconds}s — ${summary}`);
+        for (const d of report.drifted || []) logger.warn(`[refresh:${job}] ${d}`);
+
+        const result = { ok: true, job, seconds, summary, details: details(job, report) };
+        lastRun[job] = { ...result, finishedAt: new Date().toISOString() };
+        return result;
+    };
+
+    if (wait) {
+        try {
+            return res.json(finish(await withJobLock(job, JOBS[job])));
+        } catch (error) {
+            logger.error(`[refresh:${job}] failed: ${error.message}`);
+            return res.status(500).json({ ok: false, job, error: error.message });
+        }
+    }
+
     // Answer first, work after: the scheduler only needs to know we accepted it.
-    res.status(202).json({ ok: true, job, started: true });
+    res.status(202).json({ ok: true, job, started: true, tip: 'add ?wait=1 to get the result inline' });
 
     withJobLock(job, JOBS[job])
-        .then((run) => {
-            if (run.skipped) return logger.info(`[refresh:${job}] skipped — already running`);
-            const report = run.result.report || run.result;
-            logger.info(
-                `[refresh:${job}] done in ${Math.round((Date.now() - startedAt) / 1000)}s — ${summarize(job, report)}`
-            );
-            for (const d of report.drifted || []) logger.warn(`[refresh:${job}] ${d}`);
-        })
+        .then(finish)
         .catch((error) => {
             logger.error(`[refresh:${job}] failed: ${error.message}`);
+            lastRun[job] = { ok: false, job, error: error.message, finishedAt: new Date().toISOString() };
         });
+});
+
+/** The per-IPO lines behind the one-line summary. */
+function details(job, report) {
+    if (job === 'all') {
+        return {
+            subscription: report.combined.subscription.skipped
+                ? 'skipped'
+                : details('subscription', report.combined.subscription.result.report),
+            gmp: report.combined.gmp.skipped
+                ? 'skipped'
+                : details('gmp', report.combined.gmp.result.report),
+        };
+    }
+    if (job === 'discover') {
+        return { published: report.created.map((c) => `${c.name} (${c.type}, opens ${c.opens})`), drifted: report.drifted };
+    }
+    if (job === 'gmp') {
+        return { updated: report.updated.map((u) => `${u.name}: ₹${u.from} -> ₹${u.to}`), noQuote: report.noQuote.length };
+    }
+    return {
+        updated: report.updated.map((u) => `${u.name}: ${Number(u.total).toFixed(2)}x`),
+        unchanged: report.unchanged.length,
+        errors: report.errors,
+    };
+}
+
+/** What happened on the last run of each job, for checking after a fire-and-forget call. */
+router.get('/status', (req, res) => {
+    const provided = req.get('x-refresh-token') || req.query.token;
+    if (!tokenMatches(provided)) return res.status(401).json({ ok: false, error: 'unauthorized' });
+    return res.json({ ok: true, running: Object.keys(JOBS).filter(isRunning), lastRun });
 });
 
 /**
