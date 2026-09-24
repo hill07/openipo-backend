@@ -39,7 +39,7 @@ const UA =
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36';
 const NSE = 'https://www.nseindia.com';
 
-const nameKey = (s) =>
+export const nameKey = (s) =>
     String(s || '')
         .toLowerCase()
         .replace(/\b(limited|ltd|private|pvt|india|the)\b/g, '')
@@ -143,6 +143,64 @@ function parseActiveCat(detail) {
 }
 
 /**
+ * Rebase the exchange's offered quantities onto the prospectus share count.
+ *
+ * NSE sizes the fresh issue at the FLOOR price while it is still bidding, so its
+ * "shares offered" are larger than the offer actually is: for Moneyview, fresh
+ * Rs 750cr / Rs 32 + OFS = 33,48,69,200 shares against the prospectus figure of
+ * 32,10,82,435 at the Rs 34 cap. Every other IPO site quotes the prospectus basis,
+ * and so does the final basis-of-allotment once the price is fixed, so the exchange
+ * figure reads high by ~4% and makes every subscription multiple read low.
+ *
+ * Bids still come from the exchange untouched — only the denominator is restated.
+ */
+function capBasis(doc) {
+    const capShares = Number(doc.issueSize?.shares) || 0;
+    const floor = Number(doc.priceBand?.min) || 0;
+    const freshCr = Number(doc.issueBreakdown?.fresh?.cr) || 0;
+    const ofsShares = Number(doc.issueBreakdown?.ofs?.shares) || 0;
+    if (!capShares || !floor || (!freshCr && !ofsShares)) return null;
+
+    const exchangeTotal = (freshCr * 1e7) / floor + ofsShares;
+    if (!exchangeTotal) return null;
+
+    const scale = capShares / exchangeTotal;
+    // A scale outside this range means the inputs disagree; leave the data alone.
+    return scale > 0.8 && scale <= 1.0001 ? { scale, capShares } : null;
+}
+
+/**
+ * Net-of-anchor QIB percentages that SEBI's structures produce: 50% QIB less a 60%
+ * anchor leaves 20%; a loss-making issuer's 75% QIB less anchor leaves 30%.
+ */
+const QIB_NET_SHARES = [0.2, 0.3];
+
+/**
+ * The reservation split is whatever the DRHP/RHP says — it is NOT a fixed formula.
+ * Employee, shareholder and policyholder quotas, SME structures and loss-making
+ * issuers all change it. So the exchange's published proportions are preserved
+ * exactly and only the price basis is restated.
+ *
+ * QIB is the one exception. The exchange publishes it net of anchor, and anchor is a
+ * fixed share count that does not move with the price basis, so scaling alone leaves
+ * it wrong. Where the scaled figure lands within a percentage point of a net-of-anchor
+ * structure, it is snapped to that exact share; otherwise it is left scaled. No other
+ * category is ever snapped, so a real 34.2% retail portion stays 34.2% instead of
+ * being rounded up into a 35% that the prospectus never said.
+ */
+function rebaseOffered(offered, basis, category) {
+    if (!basis || !offered) return offered;
+    const scaled = offered * basis.scale;
+
+    if (category === 'QIB') {
+        const pct = scaled / basis.capShares;
+        const standard = QIB_NET_SHARES.find((s) => Math.abs(pct - s) <= 0.01);
+        if (standard) return Math.round(standard * basis.capShares);
+    }
+    return Math.round(scaled);
+}
+
+/**
  * @param {{ apply?: boolean, closedWithinDays?: number }} options
  * @returns {Promise<{ report: object, backup: Array }>} report.updated carries the per-IPO changes
  */
@@ -205,6 +263,17 @@ export async function refreshSubscriptions({ apply = false, closedWithinDays = 2
             continue;
         }
 
+        const basis = capBasis(doc);
+
+        // Categories whose offered quantity came from the prospectus. The exchange
+        // figure is a price-basis estimate; the RHP is the actual allocation, so a
+        // prospectus number is never overwritten by a derived one.
+        const fromProspectus = new Set(
+            (doc.reservations || [])
+                .filter((r) => r.enabled !== false && Number(r.sharesOffered))
+                .map((r) => String(r.category || '').toLowerCase())
+        );
+
         const parsed = parseActiveCat(detail);
         if (!parsed.categories.size) {
             report.errors.push(`${doc.companyName}: no category rows in the NSE response`);
@@ -254,7 +323,7 @@ export async function refreshSubscriptions({ apply = false, closedWithinDays = 2
                 doc.subscription.categories.push({
                     enabled: true,
                     category,
-                    sharesOffered: row.offered,
+                    sharesOffered: rebaseOffered(row.offered, basis, category),
                     appliedShares: row.bid,
                     ...(row.parent ? { parent: row.parent } : {}),
                 });
@@ -275,10 +344,17 @@ export async function refreshSubscriptions({ apply = false, closedWithinDays = 2
             }
 
             // Only fill offered when we have nothing from the prospectus.
-            if (!Number(target.sharesOffered) && row.offered) {
-                target.sharesOffered = row.offered;
+            const prospectusHeld = (ALIASES[category] || [category]).some((a) =>
+                fromProspectus.has(a.toLowerCase())
+            );
+            const offered = prospectusHeld ? 0 : rebaseOffered(row.offered, basis, category);
+            if (offered && Number(target.sharesOffered) !== offered) {
+                const before = Number(target.sharesOffered) || 0;
+                target.sharesOffered = offered;
                 changes.push(
-                    `${target.category}: offered set to ${row.offered.toLocaleString('en-IN')} from NSE`
+                    before
+                        ? `${target.category}: offered restated ${before.toLocaleString('en-IN')} -> ${offered.toLocaleString('en-IN')}`
+                        : `${target.category}: offered set to ${offered.toLocaleString('en-IN')}`
                 );
             }
         }
