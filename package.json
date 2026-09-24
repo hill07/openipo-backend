@@ -9,7 +9,8 @@
     "seed:amagi": "node src/seed/seedAmagi.js",
     "refresh:subscription": "node src/scripts/refreshSubscription.js",
     "refresh:gmp": "node src/scripts/refreshGmp.js",
-    "audit:ipo": "node src/scripts/auditIpoData.js"
+    "audit:ipo": "node src/scripts/auditIpoData.js",
+    "discover:ipos": "node src/scripts/discoverIpos.js"
   },
   "dependencies": {
     "bcrypt": "^6.0.0",

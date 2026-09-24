@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import express from 'express';
 import { refreshSubscriptions } from '../utils/subscriptionRefresh.js';
 import { refreshGmp } from '../utils/gmpRefresh.js';
+import { discoverIpos } from '../utils/ipoDiscovery.js';
 import { auditIpoData } from '../utils/subscriptionAudit.js';
 import { isRunning, withJobLock } from '../utils/jobLock.js';
 import logger from '../utils/logger.js';
@@ -26,6 +27,9 @@ const router = express.Router();
 const JOBS = {
     subscription: () => refreshSubscriptions({ apply: true }),
     gmp: () => refreshGmp({ apply: true }),
+    // Publishes IPOs that exist in the market but not in our database. Without it the
+    // refresh jobs have nothing to update and a new issue never appears on the site.
+    discover: () => discoverIpos({ apply: true }),
 };
 
 /** Constant-time compare so the token cannot be guessed a character at a time. */
@@ -38,6 +42,10 @@ function tokenMatches(provided) {
 }
 
 function summarize(job, report) {
+    if (job === 'discover') {
+        const names = report.created.map((c) => c.name).join('; ');
+        return `published ${report.created.length}${names ? ` (${names})` : ''}, ${report.drifted.length} drifted, ${report.skipped.length} skipped`;
+    }
     if (job === 'gmp') {
         return `updated ${report.updated.length}, unchanged ${report.unchanged.length}, no quote ${report.noQuote.length}`;
     }
@@ -73,9 +81,11 @@ router.all('/refresh/:job', (req, res) => {
     withJobLock(job, JOBS[job])
         .then((run) => {
             if (run.skipped) return logger.info(`[refresh:${job}] skipped — already running`);
+            const report = run.result.report || run.result;
             logger.info(
-                `[refresh:${job}] done in ${Math.round((Date.now() - startedAt) / 1000)}s — ${summarize(job, run.result.report)}`
+                `[refresh:${job}] done in ${Math.round((Date.now() - startedAt) / 1000)}s — ${summarize(job, report)}`
             );
+            for (const d of report.drifted || []) logger.warn(`[refresh:${job}] ${d}`);
         })
         .catch((error) => {
             logger.error(`[refresh:${job}] failed: ${error.message}`);
