@@ -39,6 +39,10 @@ const UA =
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36';
 const NSE = 'https://www.nseindia.com';
 
+// No upstream gets to hang the job. Without this a stalled NSE connection held the
+// lock open and every later run answered 409 until the service restarted.
+const REQUEST_TIMEOUT_MS = 20000;
+
 export const nameKey = (s) =>
     String(s || '')
         .toLowerCase()
@@ -76,6 +80,15 @@ const num = (v) => {
     return Number.isFinite(n) ? n : null;
 };
 
+/** Minutes past midnight, IST. */
+function istMinutes() {
+    const [h, m] = new Date()
+        .toLocaleTimeString('en-GB', { timeZone: 'Asia/Kolkata', hour12: false })
+        .split(':')
+        .map(Number);
+    return h * 60 + m;
+}
+
 export function istDay(value = new Date()) {
     return new Date(value).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
 }
@@ -83,6 +96,7 @@ export function istDay(value = new Date()) {
 async function nseSession() {
     const res = await fetch(`${NSE}/market-data/all-upcoming-issues-ipo`, {
         headers: { 'User-Agent': UA, Accept: 'text/html' },
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
     const cookie = (res.headers.getSetCookie?.() || []).map((c) => c.split(';')[0]).join('; ');
     return {
@@ -95,7 +109,7 @@ async function nseSession() {
 }
 
 async function getJson(url, headers) {
-    const res = await fetch(url, { headers });
+    const res = await fetch(url, { headers, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
     if (!res.ok) throw new Error(`${res.status} ${res.statusText} for ${url}`);
     return res.json();
 }
@@ -228,6 +242,7 @@ export async function refreshSubscriptions({ apply = false, closedWithinDays = 2
         unmatched: [],
         skippedRows: [],
         noExchangeRow: [],
+        notStarted: [],
         errors: [],
     };
     const backup = [];
@@ -276,7 +291,14 @@ export async function refreshSubscriptions({ apply = false, closedWithinDays = 2
 
         const parsed = parseActiveCat(detail);
         if (!parsed.categories.size) {
-            report.errors.push(`${doc.companyName}: no category rows in the NSE response`);
+            // Bidding opens at 10:00 IST and the exchange publishes nothing before then,
+            // so an empty response on an issue's first morning is expected, not a fault.
+            const opensToday = doc.dates?.open && istDay(doc.dates.open) === today;
+            if (opensToday && istMinutes() < 10 * 60 + 15) {
+                report.notStarted.push(`${doc.companyName}: bidding has not opened yet`);
+            } else {
+                report.errors.push(`${doc.companyName}: no category rows in the NSE response`);
+            }
             continue;
         }
 

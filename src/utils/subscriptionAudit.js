@@ -52,7 +52,20 @@ export async function auditIpoData({ upcomingWithinDays = 2 } = {}) {
             (r) => r.enabled !== false && Number(r.sharesOffered)
         );
 
-        if ((bidding || awaitingListing) && !measurable) {
+        // Bidding starts at 10:00 IST. On an issue's first morning there is genuinely
+        // nothing to show yet, so flagging it before the exchanges have published
+        // anything would fire a false alarm every single day.
+        const firstDay = open === today;
+        const minutesIntoDay = (() => {
+            const [h, m] = new Date()
+                .toLocaleTimeString('en-GB', { timeZone: 'Asia/Kolkata', hour12: false })
+                .split(':')
+                .map(Number);
+            return h * 60 + m;
+        })();
+        const tooEarly = firstDay && minutesIntoDay < 10 * 60 + 30;
+
+        if ((bidding || awaitingListing) && !measurable && !tooEarly) {
             problems.push(
                 `${doc.companyName} (${doc.type}, ${bidding ? 'open' : 'closed, awaiting listing'}): no subscription figure`
             );

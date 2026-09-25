@@ -60,6 +60,11 @@ async function run() {
         console.log(`\nNot in our database: ${report.unmatched.length}`);
         for (const u of report.unmatched) console.log(`  ${u}`);
     }
+    if (report.notStarted.length) {
+        console.log(`
+Bidding not open yet (nothing to read): ${report.notStarted.length}`);
+        for (const n of report.notStarted) console.log(`  ${n}`);
+    }
     if (report.errors.length) {
         console.log(`\nErrors: ${report.errors.length}`);
         for (const e of report.errors) console.log(`  ${e}`);

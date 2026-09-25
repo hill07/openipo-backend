@@ -26,6 +26,7 @@ export async function fetchReport(reportId) {
             Accept: 'application/json',
             Referer: 'https://www.investorgain.com/',
         },
+        signal: AbortSignal.timeout(20000),
     });
     if (!res.ok) throw new Error(`${res.status} ${res.statusText} from report ${reportId}`);
     const json = await res.json();
