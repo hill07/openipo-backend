@@ -17,6 +17,7 @@ import publicIpoRoutes from "./routes/v2/publicIpo.routes.js";
 import visitorRoutes from "./routes/visitor.routes.js";
 import internalRoutes from "./routes/internal.routes.js";
 import adminVisitorRoutes from "./routes/v2/adminVisitor.routes.js";
+import adminUserRoutes from "./routes/v2/adminUser.routes.js";
 
 // Admin Auth (Kept)
 import adminAuthRoutes from "./routes/adminAuth.routes.js";
@@ -132,6 +133,9 @@ app.use("/api/internal", internalRoutes);
 
 // Admin Visitor List
 app.use("/api/v2/admin/visitors", adminVisitorRoutes);
+
+// Admin User List
+app.use("/api/v2/admin/users", adminUserRoutes);
 
 // Error Handling
 app.use(notFoundMiddleware);

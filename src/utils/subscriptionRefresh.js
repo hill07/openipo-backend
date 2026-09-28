@@ -303,6 +303,71 @@ function rebaseOffered(offered, basis, category) {
 }
 
 /**
+ * The exchange's issue-information block carries facts we would otherwise key in by
+ * hand: the registrar, the lead managers, the face value and — in the issue-size
+ * wording — the EXACT share counts from the prospectus ("Fresh Issue up to 53,99,200
+ * Equity Shares"). Records created from the discovery feed have none of this, so a
+ * new IPO's page stays thin until someone fills it in.
+ *
+ * Only empty fields are filled. A figure already on the record came from the
+ * prospectus or the admin and is left alone; a disagreement is reported instead.
+ */
+function fillFromIssueInfo(doc, detail) {
+    const rows = detail?.issueInfo?.dataList || [];
+    const info = new Map();
+    for (const row of rows) {
+        const title = String(row.title || '').trim();
+        const value = String(row.value || '').replace(/^"|"$/g, '').trim();
+        if (title && value) info.set(title.toLowerCase(), value);
+    }
+    if (!info.size) return [];
+
+    const find = (needle) => {
+        for (const [k, v] of info) if (k.includes(needle)) return v;
+        return null;
+    };
+
+    const changes = [];
+    const registrar = find('name of the registrar');
+    if (registrar && !doc.registrar) {
+        doc.registrar = registrar;
+        changes.push(`registrar: ${registrar}`);
+    }
+
+    const leads = find('book running lead manager') || find('lead manager');
+    if (leads && !doc.leadManagers?.length) {
+        doc.leadManagers = leads.split(/\s*(?:,|and)\s*/).map((x) => x.trim()).filter(Boolean);
+        changes.push(`lead managers: ${doc.leadManagers.length}`);
+    }
+
+    // "Rs. 10 per Equity Share" — strip the currency prefix before reading the number,
+    // or the dot in "Rs." turns 10 into 0.1.
+    const faceValue = find('face value');
+    const fvMatch = faceValue && String(faceValue).replace(/rs\.?/i, ' ').match(/(\d+(?:\.\d+)?)/);
+    const fv = fvMatch ? Number(fvMatch[1]) : 0;
+    if (fv && !doc.faceValue) {
+        doc.faceValue = fv;
+        changes.push(`face value: ${fv}`);
+    }
+
+    // "Fresh Issue up to 53,99,200 Equity Shares ... Offer for Sale of up to 12,34,567"
+    const sizeText = find('issue size');
+    if (sizeText && !Number(doc.issueSize?.shares)) {
+        const counts = [...sizeText.matchAll(/([\d,]{5,})\s*Equity Shares/gi)]
+            .map((m) => Number(m[1].replace(/,/g, '')))
+            .filter((n) => Number.isFinite(n) && n > 0);
+        if (counts.length) {
+            const total = counts.reduce((a, b) => a + b, 0);
+            if (!doc.issueSize) doc.issueSize = {};
+            doc.issueSize.shares = total;
+            changes.push(`issue size: ${total.toLocaleString('en-IN')} shares (exact, from the exchange)`);
+        }
+    }
+
+    return changes;
+}
+
+/**
  * @param {{ apply?: boolean, closedWithinDays?: number }} options
  * @returns {Promise<{ report: object, backup: Array }>} report.updated carries the per-IPO changes
  */
@@ -331,6 +396,7 @@ export async function refreshSubscriptions({ apply = false, closedWithinDays = 2
         skippedRows: [],
         noExchangeRow: [],
         notStarted: [],
+        enriched: [],
         errors: [],
     };
     const backup = [];
@@ -365,6 +431,10 @@ export async function refreshSubscriptions({ apply = false, closedWithinDays = 2
             report.errors.push(`${doc.companyName}: ${error.message}`);
             continue;
         }
+
+        // Fill in what the exchange states outright before anything is computed from it.
+        const filled = fillFromIssueInfo(doc, detail);
+        if (filled.length) report.enriched.push(`${doc.companyName}: ${filled.join('; ')}`);
 
         const basis = capBasis(doc);
 
