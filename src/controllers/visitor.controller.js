@@ -1,4 +1,5 @@
 import Visitor from '../models/Visitor.js';
+import ExcludedIp from '../models/ExcludedIp.js';
 import SiteStat from '../models/SiteStat.js';
 import { responseHandler } from '../utils/responseHandler.js';
 
@@ -122,6 +123,14 @@ export const getVisitorCount = async (req, res, next) => {
             || req.socket.remoteAddress
             || '';
 
+        // Excluded addresses (the owner's own machines, office IPs, probes) are dropped
+        // before anything is written: no row, no count. The visible total still comes
+        // back so the footer keeps working for them.
+        if (ip && (await ExcludedIp.exists({ ip }))) {
+            const stat = await SiteStat.findOne({ identifier: 'main' }).lean();
+            return responseHandler(res, 200, true, { count: stat ? stat.visitors : 0, excluded: true });
+        }
+
         const ua = req.headers['user-agent'] || '';
         const hints = req.body || {};      // { model, platform, platformVersion, brands, mobile }
 
@@ -181,6 +190,74 @@ export const getVisitorCount = async (req, res, next) => {
 
 // ── Controller: admin visitor list ─────────────────────────────────────────
 // @route GET /api/v2/admin/visitors
+/** The address the admin is calling from, so "exclude my IP" needs no typing. */
+export const getMyIp = async (req, res, next) => {
+    try {
+        const ip = (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket.remoteAddress || '';
+        return responseHandler(res, 200, true, { ip });
+    } catch (error) {
+        next(error);
+    }
+};
+
+export const getExcludedIps = async (req, res, next) => {
+    try {
+        const ips = await ExcludedIp.find().sort({ createdAt: -1 }).lean();
+        return responseHandler(res, 200, true, { ips });
+    } catch (error) {
+        next(error);
+    }
+};
+
+/**
+ * Add an address to the exclusion list and remove whatever it has already recorded,
+ * so the list retroactively cleans up as well as preventing future rows.
+ */
+export const addExcludedIp = async (req, res, next) => {
+    try {
+        const ip = String(req.body?.ip || '').trim();
+        const note = String(req.body?.note || '').trim();
+        if (!ip) return responseHandler(res, 400, false, null, 'An IP address is required.');
+
+        const existing = await ExcludedIp.findOne({ ip });
+        if (existing) return responseHandler(res, 409, false, null, 'That IP is already excluded.');
+
+        const entry = await ExcludedIp.create({ ip, note, addedBy: req.admin?.email || '' });
+        const removed = await Visitor.deleteOne({ ip });
+
+        return responseHandler(
+            res,
+            201,
+            true,
+            { entry, removedVisitor: removed.deletedCount > 0 },
+            removed.deletedCount ? 'Excluded, and the existing record was removed.' : 'Excluded.'
+        );
+    } catch (error) {
+        next(error);
+    }
+};
+
+export const removeExcludedIp = async (req, res, next) => {
+    try {
+        const deleted = await ExcludedIp.findByIdAndDelete(req.params.id);
+        if (!deleted) return responseHandler(res, 404, false, null, 'Not found.');
+        return responseHandler(res, 200, true, { ip: deleted.ip }, 'Removed from the exclusion list.');
+    } catch (error) {
+        next(error);
+    }
+};
+
+/** Delete a single visitor row. The site-wide total is left alone — it is a running count. */
+export const deleteVisitor = async (req, res, next) => {
+    try {
+        const deleted = await Visitor.findByIdAndDelete(req.params.id);
+        if (!deleted) return responseHandler(res, 404, false, null, 'Visitor not found.');
+        return responseHandler(res, 200, true, { ip: deleted.ip }, 'Visitor deleted.');
+    } catch (error) {
+        next(error);
+    }
+};
+
 export const getAdminVisitors = async (req, res, next) => {
     try {
         const page  = Math.max(1, parseInt(req.query.page)  || 1);

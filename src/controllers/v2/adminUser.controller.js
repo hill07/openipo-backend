@@ -75,3 +75,19 @@ export const setUserPassword = async (req, res, next) => {
         next(error);
     }
 };
+
+/**
+ * Remove a site user. Irreversible, so the client asks for confirmation first; the
+ * deletion is logged with the admin who performed it.
+ */
+export const deleteUser = async (req, res, next) => {
+    try {
+        const user = await User.findByIdAndDelete(req.params.id);
+        if (!user) return responseHandler(res, 404, false, null, 'User not found.');
+
+        logger.info(`[admin] deleted user ${user.email} by ${req.admin?.email || 'admin'}`);
+        return responseHandler(res, 200, true, { id: user._id, email: user.email }, 'User deleted.');
+    } catch (error) {
+        next(error);
+    }
+};
