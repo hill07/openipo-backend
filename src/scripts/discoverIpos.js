@@ -22,7 +22,7 @@ const run = async () => {
     await mongoose.connect(process.env.MONGO_URI);
     console.log(`${APPLY ? 'APPLY' : 'DRY RUN'} — ${mongoose.connection.name}\n`);
 
-    const { created, drifted, skipped } = await discoverIpos({ apply: APPLY });
+    const { created, drifted, revised, skipped } = await discoverIpos({ apply: APPLY });
 
     console.log(`New IPOs to publish: ${created.length}`);
     for (const c of created) {
@@ -30,6 +30,9 @@ const run = async () => {
             `  ${c.opens}  ${c.type.padEnd(9)} ${c.name.padEnd(34)} ${c.band.padEnd(16)} lot ${c.lot || '?'}  ₹${c.sizeCr || '?'} Cr${c.bandFromExchange ? '' : '   [price band unconfirmed]'}`
         );
     }
+
+    console.log(`\nSchedules ${APPLY ? 'corrected' : 'to correct'}: ${revised.length}`);
+    for (const r of revised) console.log(`  ~ ${r}`);
 
     console.log(`\nExisting records that disagree with the source: ${drifted.length}`);
     for (const d of drifted) console.log(`  ! ${d}`);

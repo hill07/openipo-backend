@@ -108,7 +108,7 @@ export async function discoverIpos({ apply = false } = {}) {
     const today = istDay();
     let nextId = docs.reduce((m, d) => Math.max(m, d.ipoId || 0), 0) + 1;
 
-    const out = { created: [], drifted: [], skipped: [] };
+    const out = { created: [], drifted: [], revised: [], skipped: [] };
 
     for (const row of rows) {
         if (!['U', 'O'].includes(row.status) || !row.name) continue;
@@ -120,7 +120,20 @@ export async function discoverIpos({ apply = false } = {}) {
         const band = exchange.get(key) || null;
 
         if (match) {
-            out.drifted.push(...compare(match, row, band));
+            const drift = compare(match, row, band);
+            out.drifted.push(...drift);
+
+            // Dates get revised — issues are postponed, extended, or their listing moves.
+            // Reporting that and leaving the old dates on the page means the calendar,
+            // the status badge and the close date are all wrong for readers, so the
+            // correction is applied. Prices and lot sizes are only reported: those are
+            // prospectus terms, and a feed disagreeing with the RHP is not authority
+            // enough to overwrite them.
+            const revised = reviseDates(match, row);
+            if (revised.length) {
+                out.revised.push(`${match.companyName}: ${revised.join(', ')}`);
+                if (apply) await match.save();
+            }
             continue;
         }
 
@@ -190,6 +203,31 @@ export async function discoverIpos({ apply = false } = {}) {
     }
 
     return out;
+}
+
+/**
+ * Apply a revised schedule. Only accepted when the new dates are self-consistent —
+ * open before close before listing — so a malformed row cannot scramble a good record.
+ */
+function reviseDates(doc, row) {
+    const next = { open: row.open, close: row.close, listing: row.listing };
+    if (!next.open || !next.close) return [];
+    if (next.open > next.close) return [];
+    if (next.listing && next.listing < next.close) return [];
+
+    const changes = [];
+    for (const field of ['open', 'close', 'listing']) {
+        const value = next[field];
+        if (!value) continue;
+        const current = doc.dates?.[field] ? istDay(doc.dates[field]) : null;
+        if (current === value) continue;
+        changes.push(`${field} ${current || 'unset'} -> ${value}`);
+        doc.dates[field] = new Date(value);
+    }
+    if (changes.length && row.allotment && istDay(doc.dates.allotment) !== row.allotment) {
+        doc.dates.allotment = new Date(row.allotment);
+    }
+    return changes;
 }
 
 /** Headline facts that readers act on; anything else is left to the prospectus. */

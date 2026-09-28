@@ -89,6 +89,22 @@ function istMinutes() {
     return h * 60 + m;
 }
 
+/**
+ * Exact key first, then a prefix match in either direction — sources abbreviate
+ * differently ("Sai Urja Indo" vs "Sai Urja Indo Ventures Limited", "German Green
+ * Steel" vs "German Green Steel and Power Limited"). Ambiguous prefixes are refused,
+ * and every caller checks a date or price before writing anything.
+ */
+function findByName(byName, name) {
+    const key = nameKey(name);
+    if (!key) return null;
+    if (byName.has(key)) return byName.get(key);
+    if (key.length < 10) return null;
+
+    const hits = [...byName.keys()].filter((k) => k.startsWith(key) || key.startsWith(k));
+    return hits.length === 1 ? byName.get(hits[0]) : null;
+}
+
 export function istDay(value = new Date()) {
     return new Date(value).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
 }
@@ -321,7 +337,7 @@ export async function refreshSubscriptions({ apply = false, closedWithinDays = 2
 
     for (const issue of current) {
         const doc =
-            bySymbol.get(String(issue.symbol).toUpperCase()) || byName.get(nameKey(issue.companyName));
+            bySymbol.get(String(issue.symbol).toUpperCase()) || findByName(byName, issue.companyName);
 
         if (!doc) {
             report.unmatched.push(`${issue.companyName} (${issue.symbol})`);
@@ -526,8 +542,10 @@ export async function refreshSubscriptions({ apply = false, closedWithinDays = 2
 
 /** "24-09-2026" -> "2026-09-24"; anything else -> null. */
 function fromDmy(value) {
-    const m = String(value || '').match(/^(\d{2})-(\d{2})-(\d{4})$/);
-    return m ? `${m[3]}-${m[2]}-${m[1]}` : null;
+    // The feed is inconsistent: "29-09-2026" but also "5-10-2026".
+    const m = String(value || '').trim().match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/);
+    if (!m) return null;
+    return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
 }
 
 const TIMES_COLUMNS = [
@@ -548,8 +566,12 @@ async function refreshBseSme({ docs, byName, report, backup, apply, today }) {
     const handled = new Set(report.updated.map((u) => u.slug));
 
     for (const row of rows) {
-        const name = stripHtml(row.Name).replace(/\s*(BSE|NSE)\s*SME.*$/i, '').trim();
-        const doc = byName.get(nameKey(name));
+        // The Name cell is a link followed by badges and a GMP blurb. Only the link text
+        // is the company; taking the whole cell dragged "IPO GMP: 26 (18.71%)" into the
+        // name and no mainboard issue ever matched.
+        const linked = String(row.Name || '').match(/<a[^>]*>([^<]+)<\/a>/);
+        const name = (linked ? linked[1] : stripHtml(row.Name).replace(/\s*(BSE|NSE)\s*SME.*$/i, '')).trim();
+        const doc = findByName(byName, name);
         if (!doc || handled.has(doc.slug)) continue;
 
         // The exchange feed is authoritative where it exists; only fill the gap.
