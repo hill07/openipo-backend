@@ -478,7 +478,11 @@ export async function refreshSubscriptions({ apply = false, closedWithinDays = 2
             }
 
             // Only fill offered when we have nothing from the prospectus.
-            const prospectusHeld = (ALIASES[category] || [category]).some((a) =>
+            // A sub-row belongs to its parent: once NII comes from the prospectus, the
+            // sNII/bNII split of it is prospectus-derived too and must not be rebased
+            // back to the exchange's figures.
+            const holder = row.parent || category;
+            const prospectusHeld = (ALIASES[holder] || [holder]).some((a) =>
                 fromProspectus.has(a.toLowerCase())
             );
             const offered = prospectusHeld ? 0 : rebaseOffered(row.offered, basis, category);
@@ -512,6 +516,9 @@ export async function refreshSubscriptions({ apply = false, closedWithinDays = 2
             continue;
         }
 
+        // Prospectus reservations win, and are flagged as such; anything else the
+        // refresh writes is derived from the exchange.
+        doc.subscription.offeredSource = fromProspectus.size ? 'prospectus' : 'derived';
         doc.subscription.source = 'NSE';
         doc.subscription.updatedAtText = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
         computeDerivedFields(doc);
@@ -668,6 +675,9 @@ async function refreshBseSme({ docs, byName, report, backup, apply, today }) {
             continue;
         }
 
+        doc.subscription.offeredSource = doc.reservations?.some((r) => Number(r.sharesOffered))
+            ? 'prospectus'
+            : 'derived';
         doc.subscription.source = 'BSE';
         doc.subscription.updatedAtText = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
         computeDerivedFields(doc);

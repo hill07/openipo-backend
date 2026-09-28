@@ -157,6 +157,12 @@ const ipoFullSchema = new mongoose.Schema({
         // Overall multiple as published, for issues where no share counts exist.
         totalTimesReported: Number,
 
+        // 'prospectus' once the RHP reservation split has been entered, 'derived' while
+        // the offered quantities are still restated from the exchange's floor-price
+        // figures. Shown to readers so an approximate denominator is never presented
+        // as an exact one.
+        offeredSource: { type: String, enum: ['prospectus', 'derived'], default: undefined },
+
         days: [subscriptionDaySchema],
 
         // REMOVED: summary (dynamic calculation only)

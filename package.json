@@ -11,7 +11,8 @@
     "refresh:gmp": "node src/scripts/refreshGmp.js",
     "audit:ipo": "node src/scripts/auditIpoData.js",
     "discover:ipos": "node src/scripts/discoverIpos.js",
-    "refresh": "node src/scripts/refreshSubscription.js --apply && node src/scripts/refreshGmp.js --apply"
+    "refresh": "node src/scripts/refreshSubscription.js --apply && node src/scripts/refreshGmp.js --apply",
+    "set:reservations": "node src/scripts/setReservations.js"
   },
   "dependencies": {
     "bcrypt": "^6.0.0",

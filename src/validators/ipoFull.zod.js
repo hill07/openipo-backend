@@ -114,6 +114,7 @@ const ipoFullSchema = z.object({
 
         // Totals (Backend Calculated)
         totalTimesReported: numeric,
+        offeredSource: z.enum(['prospectus', 'derived']).optional(),
         totalTimes: numeric,
         totalOffered: numeric,
         totalApplied: numeric,
