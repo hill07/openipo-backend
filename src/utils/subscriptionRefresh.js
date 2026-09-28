@@ -173,12 +173,18 @@ function capBasis(doc) {
     const floor = Number(doc.priceBand?.min) || 0;
     const freshCr = Number(doc.issueBreakdown?.fresh?.cr) || 0;
     const ofsShares = Number(doc.issueBreakdown?.ofs?.shares) || 0;
-    if (!capShares || !floor || (!freshCr && !ofsShares)) return null;
+    if (!capShares || !floor) return null;
 
-    const exchangeTotal = (freshCr * 1e7) / floor + ofsShares;
-    if (!exchangeTotal) return null;
+    const cap = Number(doc.priceBand?.max) || 0;
 
-    const scale = capShares / exchangeTotal;
+    // Preferred: the fresh/OFS breakdown gives the exchange's own floor-price total.
+    // Records created from the discovery feed have no breakdown, so fall back to the
+    // price band itself — less precise, but it only steers the snap below, never the
+    // published figures, and without it those IPOs keep the exchange's inflated numbers.
+    const exchangeTotal = freshCr || ofsShares ? (freshCr * 1e7) / floor + ofsShares : 0;
+    const scale = exchangeTotal ? capShares / exchangeTotal : cap ? floor / cap : 0;
+    if (!scale) return null;
+
     // A scale outside this range means the inputs disagree; leave the data alone.
     return scale > 0.8 && scale <= 1.0001 ? { scale, capShares } : null;
 }
@@ -188,6 +194,54 @@ function capBasis(doc) {
  * anchor leaves 20%; a loss-making issuer's 75% QIB less anchor leaves 30%.
  */
 const QIB_NET_SHARES = [0.2, 0.3];
+
+/**
+ * How much of the net offer goes to the public categories, once the anchor portion is
+ * out. SEBI's structures land on round fractions — 0.70 for a 50% QIB book (QIB 20 +
+ * NII 15 + Retail 35 after a 60% anchor), 0.55 for a loss-making issuer's 75% QIB book
+ * (30 + 15 + 10) — but the SPLIT between categories is never assumed: it is taken from
+ * the exchange's own ratios, so an issue with a shareholder quota, an unusual retail
+ * share or any structure we have not seen still comes out right.
+ */
+const PUBLIC_FRACTION_STEP = 0.05;
+const PUBLIC_FRACTION_TOLERANCE = 0.015;
+
+/**
+ * Work out what fraction of the net offer the public categories hold, and each one's
+ * exact share of it.
+ *
+ * The exchange's absolute numbers sit on a floor-price basis and read a few per cent
+ * high, but the ratios between its categories are exact. So: estimate the public
+ * fraction from the scaled totals, snap it to the nearest SEBI-shaped fraction only if
+ * it is already within a point and a half of one, then divide that by the exchange's
+ * own ratios. Nothing here fixes retail at 35% — that number comes from the data.
+ *
+ * Returns null when the estimate does not land near a recognisable fraction, and the
+ * caller then falls back to restating the price basis alone.
+ */
+function publicSplit(categories, basis) {
+    const nii = categories.get('NII')?.offered;
+    const retail = categories.get('Retail')?.offered;
+    if (!nii || !retail || !basis?.netShares) return null;
+
+    // QIB is deliberately excluded. The exchange publishes it net of anchor, and the
+    // anchor is a fixed share count struck on anchor day, so QIB's ratio to the others
+    // is not the prospectus ratio — folding it in skews every category. QIB keeps its
+    // own net-of-anchor snap in rebaseOffered().
+    const sumExchange = nii + retail;
+    const estimate = (sumExchange * basis.scale) / basis.netShares;
+
+    const snapped = Math.round(estimate / PUBLIC_FRACTION_STEP) * PUBLIC_FRACTION_STEP;
+    if (Math.abs(estimate - snapped) > PUBLIC_FRACTION_TOLERANCE) return null;
+    if (snapped <= 0 || snapped >= 1) return null;
+
+    // Their ratio to each other IS exact, so the snapped total divides cleanly.
+    return {
+        combined: snapped,
+        shares: { NII: (nii / sumExchange) * snapped, Retail: (retail / sumExchange) * snapped },
+    };
+}
+
 
 /**
  * The reservation split is whatever the DRHP/RHP says — it is NOT a fixed formula.
@@ -205,12 +259,24 @@ const QIB_NET_SHARES = [0.2, 0.3];
 function rebaseOffered(offered, basis, category) {
     if (!basis || !offered) return offered;
 
-    // A reserved quota is a fixed carve-out, not a share of the net offer, so it is
-    // never reduced by the net factor — only the public categories are.
     const reserved = ['Employee', 'Shareholder', 'Policyholder'].includes(category);
-    const netFactor = reserved ? 1 : basis.netFactor ?? 1;
-    const netShares = basis.capShares * (basis.netFactor ?? 1);
-    const scaled = offered * basis.scale * netFactor;
+    const netShares = basis.netShares ?? basis.capShares;
+
+    // Preferred path: take the category straight from the prospectus share count,
+    // using the exchange's own ratios for the split. Exact, rather than scaled.
+    if (!reserved && basis.split) {
+        const share = basis.split.shares[category];
+        if (share) return Math.round(share * netShares);
+
+        const parent = basis.split.shares.NII;
+        if (parent && basis.niiSplit && (category === 'bNII' || category === 'sNII')) {
+            return Math.round(parent * netShares * basis.niiSplit[category]);
+        }
+    }
+
+    // Fallback for anything unrecognised: restate the price basis only, and never
+    // shrink a reserved quota, which is a fixed carve-out rather than a percentage.
+    const scaled = offered * basis.scale * (reserved ? 1 : basis.netFactor ?? 1);
 
     if (category === 'QIB') {
         const pct = scaled / netShares;
@@ -305,10 +371,19 @@ export async function refreshSubscriptions({ apply = false, closedWithinDays = 2
         if (basis) {
             const carveOut = ['Employee', 'Shareholder', 'Policyholder'].reduce((sum, name) => {
                 const row = parsed.categories.get(name);
-                return sum + (row?.offered ? row.offered * basis.scale : 0);
+                return sum + (row?.offered ? Math.round(row.offered * basis.scale) : 0);
             }, 0);
-            basis.netFactor = carveOut ? (basis.capShares - carveOut) / basis.capShares : 1;
-            basis.carveOut = carveOut;
+            basis.netShares = basis.capShares - carveOut;
+            basis.netFactor = basis.netShares / basis.capShares;
+            basis.split = publicSplit(parsed.categories, basis);
+            // Sub-rows keep the exchange's own split of the parent (bNII is 2/3 of NII).
+            const nii = parsed.categories.get('NII')?.offered;
+            basis.niiSplit = nii
+                ? {
+                      bNII: (parsed.categories.get('bNII')?.offered || 0) / nii,
+                      sNII: (parsed.categories.get('sNII')?.offered || 0) / nii,
+                  }
+                : null;
         }
 
         if (!parsed.categories.size) {
