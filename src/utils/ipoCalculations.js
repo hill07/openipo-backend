@@ -117,8 +117,11 @@ export const computeDerivedFields = (ipoDoc) => {
                 // So Total Applied = Sum(Applied)
                 // Total Offered = Sum(Effective Offered) [Offered - Anchor]
 
-                totalOffered += effectiveOffered;
-                totalApplied += applied;
+                // Only categories with a denominator contribute to the overall ratio.
+                if (effectiveOffered > 0) {
+                    totalOffered += effectiveOffered;
+                    totalApplied += applied;
+                }
             }
         });
 

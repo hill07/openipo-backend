@@ -519,9 +519,27 @@ export async function refreshSubscriptions({ apply = false, closedWithinDays = 2
 
             if (!target) {
                 if (!row.offered) {
-                    report.skippedRows.push(
-                        `${doc.companyName}: "${row.label}" -> ${category} (no reservation on our record, NSE offered 0)`
-                    );
+                    // SME issues are published with no offered figure, so a category we
+                    // hold no reservation for cannot be measured. The BIDS are real
+                    // though, and dropping them hid live QIB demand entirely — so the
+                    // quantity is recorded with no denominator, shown without a multiple
+                    // and left out of the totals.
+                    if (row.bid) {
+                        doc.subscription.categories.push({
+                            enabled: true,
+                            category,
+                            sharesOffered: 0,
+                            appliedShares: row.bid,
+                            ...(row.parent ? { parent: row.parent } : {}),
+                        });
+                        changes.push(
+                            `${category}: ${row.bid.toLocaleString('en-IN')} bid (no reservation on our record, so no multiple)`
+                        );
+                    } else {
+                        report.skippedRows.push(
+                            `${doc.companyName}: "${row.label}" -> ${category} (no reservation on our record, NSE offered 0)`
+                        );
+                    }
                     continue;
                 }
                 doc.subscription.categories.push({

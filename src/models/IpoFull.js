@@ -283,7 +283,9 @@ ipoFullSchema.virtual('subscription.totalTimes').get(function () {
 
     // Sum enabled categories
     const totalOffered = this.subscription.categories.reduce((sum, c) => (c.enabled && !c.parent && c.sharesOffered) ? sum + c.sharesOffered : sum, 0);
-    const totalApplied = this.subscription.categories.reduce((sum, c) => (c.enabled && !c.parent && c.appliedShares) ? sum + c.appliedShares : sum, 0);
+    // A category with no known reservation has no denominator, so counting its bids
+    // here would raise the overall multiple against a total it was never part of.
+    const totalApplied = this.subscription.categories.reduce((sum, c) => (c.enabled && !c.parent && c.sharesOffered && c.appliedShares) ? sum + c.appliedShares : sum, 0);
 
     // No share counts anywhere: fall back to the overall multiple as published.
     // Never average the category multiples — they are weighted by reservation size.
@@ -298,7 +300,7 @@ ipoFullSchema.virtual('subscription.totalOffered').get(function () {
 
 ipoFullSchema.virtual('subscription.totalApplied').get(function () {
     if (!this.subscription || !this.subscription.categories) return 0;
-    return this.subscription.categories.reduce((sum, c) => (c.enabled && !c.parent && c.appliedShares) ? sum + c.appliedShares : sum, 0);
+    return this.subscription.categories.reduce((sum, c) => (c.enabled && !c.parent && c.sharesOffered && c.appliedShares) ? sum + c.appliedShares : sum, 0);
 });
 
 ipoFullSchema.virtual('gmp.percent').get(function () {
