@@ -204,12 +204,18 @@ const QIB_NET_SHARES = [0.2, 0.3];
  */
 function rebaseOffered(offered, basis, category) {
     if (!basis || !offered) return offered;
-    const scaled = offered * basis.scale;
+
+    // A reserved quota is a fixed carve-out, not a share of the net offer, so it is
+    // never reduced by the net factor — only the public categories are.
+    const reserved = ['Employee', 'Shareholder', 'Policyholder'].includes(category);
+    const netFactor = reserved ? 1 : basis.netFactor ?? 1;
+    const netShares = basis.capShares * (basis.netFactor ?? 1);
+    const scaled = offered * basis.scale * netFactor;
 
     if (category === 'QIB') {
-        const pct = scaled / basis.capShares;
+        const pct = scaled / netShares;
         const standard = QIB_NET_SHARES.find((s) => Math.abs(pct - s) <= 0.01);
-        if (standard) return Math.round(standard * basis.capShares);
+        if (standard) return Math.round(standard * netShares);
     }
     return Math.round(scaled);
 }
@@ -290,6 +296,21 @@ export async function refreshSubscriptions({ apply = false, closedWithinDays = 2
         );
 
         const parsed = parseActiveCat(detail);
+
+        // SEBI's percentages apply to the NET offer — the issue less any employee,
+        // shareholder or policyholder reservation carved out first. The exchange
+        // reports the public categories against the gross issue, so without this the
+        // whole table reads high by exactly the size of that quota (0.55% on A-One
+        // Steels). An issue with no such quota is unaffected: the factor is 1.
+        if (basis) {
+            const carveOut = ['Employee', 'Shareholder', 'Policyholder'].reduce((sum, name) => {
+                const row = parsed.categories.get(name);
+                return sum + (row?.offered ? row.offered * basis.scale : 0);
+            }, 0);
+            basis.netFactor = carveOut ? (basis.capShares - carveOut) / basis.capShares : 1;
+            basis.carveOut = carveOut;
+        }
+
         if (!parsed.categories.size) {
             // Bidding opens at 10:00 IST and the exchange publishes nothing before then,
             // so an empty response on an issue's first morning is expected, not a fault.
