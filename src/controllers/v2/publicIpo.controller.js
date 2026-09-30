@@ -26,7 +26,7 @@ export const getIpos = async (req, res, next) => {
 
         const count = await IpoFull.countDocuments(query);
         const ipos = await IpoFull.find(query)
-            .select('companyName slug symbol dates status type priceBand gmp.current subscription.subscriptionTimes logo allotment') // optimization
+            .select('companyName slug symbol dates status type priceBand gmp.current subscription.subscriptionTimes logo allotment registrar') // optimization
             .sort({ 'dates.open': -1 }) // Show newest first? Or upcoming?
             .limit(limit)
             .skip((page - 1) * limit)
@@ -88,6 +88,48 @@ export const getIpoNote = async (req, res, next) => {
         }
 
         return responseHandler(res, 200, true, ipo.note);
+    } catch (error) {
+        next(error);
+    }
+};
+
+// @desc    Get an IPO's subscription figures only
+// @route   GET /api/v2/ipos/:slug/subscription
+// @access  Public
+//
+// The full record is ~12 KB and most of it — description, financials, peers, documents —
+// never changes during bidding. This returns the part that does, plus the few fields a
+// client needs to derive the application-wise breakup for itself (lot size and the
+// cut-off price). Virtuals are resolved through toObject rather than a lean read,
+// because the per-category `times` lives on the subdocument schema.
+export const getIpoSubscription = async (req, res, next) => {
+    try {
+        const { slug: idOrSlug } = req.params;
+        const isNumeric = /^\d+$/.test(idOrSlug);
+
+        const query = isNumeric
+            ? { ipoId: parseInt(idOrSlug), isPublished: true, isDeleted: false }
+            : { slug: idOrSlug, isPublished: true, isDeleted: false };
+
+        const ipo = await IpoFull.findOne(query).select(
+            'companyName slug status dates lotSize priceBand subscription'
+        );
+
+        if (!ipo) {
+            return responseHandler(res, 404, false, null, 'IPO not found');
+        }
+
+        const obj = ipo.toObject({ virtuals: true });
+
+        return responseHandler(res, 200, true, {
+            companyName: obj.companyName,
+            slug: obj.slug,
+            status: obj.status,
+            dates: obj.dates,
+            lotSize: obj.lotSize,
+            priceBand: obj.priceBand,
+            subscription: obj.subscription || null,
+        });
     } catch (error) {
         next(error);
     }
