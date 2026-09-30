@@ -6,3 +6,6 @@ npm-debug.log*
 
 # Rollback snapshots written by the refresh scripts
 *-backup-*.json
+
+# Handover state between the two phases of `npm run logos:download` / `logos:switch`.
+.pending-logos.json

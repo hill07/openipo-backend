@@ -12,7 +12,9 @@
     "audit:ipo": "node src/scripts/auditIpoData.js",
     "discover:ipos": "node src/scripts/discoverIpos.js",
     "refresh": "node src/scripts/refreshSubscription.js --apply && node src/scripts/refreshGmp.js --apply",
-    "set:reservations": "node src/scripts/setReservations.js"
+    "set:reservations": "node src/scripts/setReservations.js",
+    "logos:download": "node src/scripts/localiseLogos.js download",
+    "logos:switch": "node src/scripts/localiseLogos.js switch"
   },
   "dependencies": {
     "bcrypt": "^6.0.0",
