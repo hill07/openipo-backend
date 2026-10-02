@@ -26,7 +26,7 @@ export const getIpos = async (req, res, next) => {
 
         const count = await IpoFull.countDocuments(query);
         const ipos = await IpoFull.find(query)
-            .select('companyName slug symbol dates status type priceBand gmp.current subscription.subscriptionTimes logo allotment registrar') // optimization
+            .select('companyName slug symbol dates status type priceBand gmp.current subscription.subscriptionTimes logo allotment registrar proseWords') // optimization
             .sort({ 'dates.open': -1 }) // Show newest first? Or upcoming?
             .limit(limit)
             .skip((page - 1) * limit)

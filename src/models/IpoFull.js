@@ -233,6 +233,15 @@ const ipoFullSchema = new mongoose.Schema({
     weaknesses: [String],
     address: String,
 
+    /**
+     * Words of prose written about the company, as opposed to figures pulled from an
+     * exchange. Stored rather than computed on read so the public list endpoint can
+     * expose it without shipping every description to every caller: the sitemap needs
+     * to know which IPO pages carry enough of their own writing to be worth
+     * submitting, and the frontend owns the threshold (lib/indexability.js).
+     */
+    proseWords: { type: Number, default: 0 },
+
     /* ===== Documents ===== */
 
     docs: {
@@ -269,6 +278,26 @@ const ipoFullSchema = new mongoose.Schema({
     timestamps: true,
     toJSON: { virtuals: true },
     toObject: { virtuals: true }
+});
+
+/* Keep proseWords in step with the prose on every write. */
+
+function countWords(value) {
+    if (!value) return 0;
+    if (typeof value === 'string') {
+        return value.replace(/<[^>]+>/g, ' ').split(/\s+/).filter((w) => /[a-z]/i.test(w)).length;
+    }
+    if (Array.isArray(value)) return value.reduce((n, item) => n + countWords(item), 0);
+    return 0;
+}
+
+ipoFullSchema.pre('save', function (next) {
+    this.proseWords =
+        countWords(this.description) +
+        countWords(this.objectives) +
+        countWords(this.strengths) +
+        countWords(this.weaknesses);
+    next();
 });
 
 /* Virtuals */
