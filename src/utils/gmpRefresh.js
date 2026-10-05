@@ -129,16 +129,28 @@ export async function refreshGmp({ apply = false } = {}) {
             continue;
         }
 
-        // No live quote ("--") is not the same as a premium of zero, so the last real
-        // figure is kept rather than flattened. It must be MARKED, though: leaving it
-        // unflagged meant an issue the grey market stopped quoting eleven days earlier
-        // still showed "+₹8 (+15.38%)" and an estimated listing price, with nothing to
-        // tell a reader the number had stopped moving.
+        // The grey market has stopped quoting this issue: the report shows "--" rather
+        // than a figure. The premium is published as zero.
+        //
+        // This is a deliberate choice over keeping the last real number. Holding it left
+        // an eleven-day-old "+₹8 (+15.38%)" on the page looking current, and the honest
+        // alternative — showing the stale figure with a notice explaining it — cluttered
+        // the card for issues nobody trades. Zero reads cleanly and is what readers
+        // expect; the last real quote is still in `history`, and `quoted: false` records
+        // that this is an absence of trading rather than a measured premium.
         if (!row.quoted) {
             report.noQuote.push(`${doc.companyName} (showing ₹${Number(doc.gmp?.current) || 0})`);
-            if (doc.gmp?.quoted !== false) {
+
+            const held = Number(doc.gmp?.current) || 0;
+            const alreadyMarked = doc.gmp?.quoted === false;
+            if (held !== 0 || !alreadyMarked) {
+                if (held !== 0) backup.push({ slug: doc.slug, gmp: { current: held } });
                 if (!doc.gmp) doc.gmp = {};
+                doc.gmp.current = 0;
                 doc.gmp.quoted = false;
+                // Stamp only when a figure actually changed, so the card does not claim a
+                // fresh reading for a record that was merely re-confirmed as unquoted.
+                if (held !== 0) doc.gmp.lastUpdatedAtText = istNow();
                 if (apply) {
                     try {
                         await doc.save();
@@ -154,6 +166,22 @@ export async function refreshGmp({ apply = false } = {}) {
         const prev = Number(doc.gmp?.current) || 0;
         if (prev === next) {
             report.unchanged.push(doc.companyName);
+            // The premium has not moved, but a quote DID arrive. Returning here without
+            // recording that left the flag wherever it was: an issue that stopped being
+            // quoted and later resumed at the same price would have kept telling readers
+            // the figure was historic, indefinitely.
+            if (doc.gmp?.quoted !== true) {
+                if (!doc.gmp) doc.gmp = {};
+                doc.gmp.quoted = true;
+                doc.gmp.quotedAtText = istNow();
+                if (apply) {
+                    try {
+                        await doc.save();
+                    } catch (error) {
+                        report.errors.push(`${doc.companyName}: save failed — ${error.message}`);
+                    }
+                }
+            }
             continue;
         }
 
