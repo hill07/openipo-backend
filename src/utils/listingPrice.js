@@ -159,6 +159,33 @@ async function angelBySymbol(symbols, report) {
  * @param {{ apply?: boolean }} options
  * @returns {Promise<{ report: object }>}
  */
+/**
+ * Quote one symbol and report what came back, writing nothing.
+ *
+ * The capture itself only runs against issues that have not listed, and those have no
+ * instrument token yet — so the first real exercise of the broker session would
+ * otherwise be the listing morning, which is the worst moment to discover a wrong PIN.
+ * Pointing this at an already-listed symbol proves the whole chain today.
+ */
+export async function probeSymbol(symbol) {
+    const report = { buckets: [], captured: [], skipped: [], errors: [] };
+    const upper = String(symbol || '').toUpperCase();
+    if (!upper) return { report: { ...report, errors: ['no symbol given'] } };
+
+    const prices = await angelBySymbol([upper], report);
+    const hit = prices.get(upper);
+
+    return {
+        report: {
+            ...report,
+            symbol: upper,
+            angelConfigured: angel.isConfigured(),
+            price: hit ? hit.price : null,
+            previousClose: hit ? hit.previousClose : null,
+        },
+    };
+}
+
 export async function captureListingPrices({ apply = false } = {}) {
     const report = { buckets: [], captured: [], skipped: [], errors: [] };
     const today = istDay();

@@ -6,7 +6,7 @@ import { discoverIpos } from '../utils/ipoDiscovery.js';
 import { auditIpoData } from '../utils/subscriptionAudit.js';
 import { isRunning, withJobLock } from '../utils/jobLock.js';
 import logger from '../utils/logger.js';
-import { captureListingPrices } from '../utils/listingPrice.js';
+import { captureListingPrices, probeSymbol } from '../utils/listingPrice.js';
 
 /**
  * Trigger endpoint for an external scheduler (cron-job.org).
@@ -207,6 +207,25 @@ router.all('/audit', async (req, res) => {
  * external scheduler set to POST would otherwise get a confusing 404 from a
  * GET-only route, which looks like a failed deploy rather than a wrong verb.
  */
+/**
+ * Quote one symbol through the broker and report the result. Read-only: it writes
+ * nothing, and exists so the credentials can be proved against a listed symbol rather
+ * than first exercised on a listing morning.
+ *
+ *   /api/internal/probe?token=…&symbol=MONEYVIEW
+ */
+router.all('/probe', async (req, res) => {
+    const provided = req.get('x-refresh-token') || req.query.token;
+    if (!tokenMatches(provided)) return res.status(401).json({ ok: false, error: 'unauthorized' });
+
+    try {
+        const { report } = await probeSymbol(req.query.symbol);
+        return res.json({ ok: true, ...report });
+    } catch (error) {
+        return res.status(500).json({ ok: false, error: error.message });
+    }
+});
+
 router.all('/ping', (_req, res) => res.json({ ok: true, at: new Date().toISOString() }));
 
 export default router;
