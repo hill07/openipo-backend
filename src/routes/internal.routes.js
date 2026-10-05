@@ -66,7 +66,12 @@ function summarize(job, report) {
     if (job === 'gmp') {
         return `updated ${report.updated.length}, unchanged ${report.unchanged.length}, no quote ${report.noQuote.length}`;
     }
-    return `updated ${report.updated.length}, unchanged ${report.unchanged.length}, errors ${report.errors.length}`;
+    // Say it outright when an exchange was unreachable. The run still succeeds — the
+    // fallback feed covers it — so without this the summary reads like a healthy pass
+    // while the better source is quietly missing, which is how a week of frozen
+    // subscription figures went unnoticed.
+    const nse = report.nseError ? `, NSE UNREACHABLE (${report.nseError})` : '';
+    return `updated ${report.updated.length}, unchanged ${report.unchanged.length}, errors ${report.errors.length}${nse}`;
 }
 
 router.all('/refresh/:job', async (req, res) => {
@@ -155,6 +160,7 @@ function details(job, report) {
         updated: report.updated.map((u) => `${u.name}: ${Number(u.total).toFixed(2)}x`),
         unchanged: report.unchanged.length,
         errors: report.errors,
+        ...(report.nseError ? { nseError: report.nseError } : {}),
     };
 }
 
