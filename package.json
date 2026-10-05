@@ -1,6 +1,9 @@
 {
   "name": "openipo-backend",
   "version": "1.0.0",
+  "engines": {
+    "node": ">=20"
+  },
   "type": "module",
   "main": "src/server.js",
   "scripts": {

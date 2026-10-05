@@ -111,17 +111,60 @@ export function istDay(value = new Date()) {
     return new Date(value).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
 }
 
+/**
+ * The NSE hands out session cookies on an HTML page and answers 403 on its JSON API
+ * without them.
+ *
+ * Reading them used to be `res.headers.getSetCookie?.()`, and that optional call is a
+ * trap: on a runtime without the method it yields undefined, the `|| []` turns it into
+ * an empty cookie header, and every API call comes back 403 — while the HTML fetch that
+ * preceded it succeeded, so the failure looks like a block rather than a missing header.
+ * Node 20+ has getSetCookie; the host picks its own version and package.json pins none.
+ *
+ * So: use it when it exists, fall back to the raw Set-Cookie header, and say outright
+ * when no cookie was obtained instead of sending an empty one and reporting the 403.
+ */
+function readCookies(res) {
+    if (typeof res.headers.getSetCookie === 'function') {
+        const jar = res.headers.getSetCookie();
+        if (jar?.length) return jar;
+    }
+    // A single joined header; split on the comma that precedes a new "name=" pair so an
+    // Expires date ("Mon, 05 Oct 2026 ...") is not mistaken for a separator.
+    const raw = res.headers.get('set-cookie');
+    return raw ? raw.split(/,(?=\s*[^;=,]+=)/) : [];
+}
+
 async function nseSession() {
     const res = await fetch(`${NSE}/market-data/all-upcoming-issues-ipo`, {
-        headers: { 'User-Agent': UA, Accept: 'text/html' },
+        headers: {
+            'User-Agent': UA,
+            Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'none',
+            'Upgrade-Insecure-Requests': '1',
+        },
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
-    const cookie = (res.headers.getSetCookie?.() || []).map((c) => c.split(';')[0]).join('; ');
+
+    const cookie = readCookies(res).map((c) => c.split(';')[0].trim()).filter(Boolean).join('; ');
+    if (!cookie) {
+        throw new Error(
+            `no session cookie from ${NSE} (page returned ${res.status}) — the API will answer 403 without one`
+        );
+    }
+
     return {
         'User-Agent': UA,
         Accept: 'application/json, text/plain, */*',
         'Accept-Language': 'en-US,en;q=0.9',
         Referer: `${NSE}/market-data/all-upcoming-issues-ipo`,
+        'Sec-Fetch-Dest': 'empty',
+        'Sec-Fetch-Mode': 'cors',
+        'Sec-Fetch-Site': 'same-origin',
+        'X-Requested-With': 'XMLHttpRequest',
         Cookie: cookie,
     };
 }
