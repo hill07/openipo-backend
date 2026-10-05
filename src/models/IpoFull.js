@@ -145,6 +145,20 @@ const ipoFullSchema = new mongoose.Schema({
     gmp: {
         current: { type: Number, default: 0 },
         lastUpdatedAtText: String,
+
+        /**
+         * Whether the grey market is still quoting this issue.
+         *
+         * A dealer report shows "--" once an issue stops trading, which is not a premium
+         * of zero — so the last real figure is kept rather than flattened. But keeping it
+         * silently meant the page presented an eleven-day-old premium, and an estimated
+         * listing price derived from it, as though both were current. This records the
+         * absence so the page can say the quote has stopped instead of implying it holds.
+         */
+        quoted: { type: Boolean, default: true },
+        /** When a real quote was last seen, as opposed to when the record was touched. */
+        quotedAtText: String,
+
         history: [gmpHistorySchema]
     },
 

@@ -129,10 +129,24 @@ export async function refreshGmp({ apply = false } = {}) {
             continue;
         }
 
-        // No live quote ("--") is not the same as a premium of zero. Leave whatever we
-        // have and say so, rather than flattening a real number to 0.
+        // No live quote ("--") is not the same as a premium of zero, so the last real
+        // figure is kept rather than flattened. It must be MARKED, though: leaving it
+        // unflagged meant an issue the grey market stopped quoting eleven days earlier
+        // still showed "+₹8 (+15.38%)" and an estimated listing price, with nothing to
+        // tell a reader the number had stopped moving.
         if (!row.quoted) {
             report.noQuote.push(`${doc.companyName} (showing ₹${Number(doc.gmp?.current) || 0})`);
+            if (doc.gmp?.quoted !== false) {
+                if (!doc.gmp) doc.gmp = {};
+                doc.gmp.quoted = false;
+                if (apply) {
+                    try {
+                        await doc.save();
+                    } catch (error) {
+                        report.errors.push(`${doc.companyName}: save failed — ${error.message}`);
+                    }
+                }
+            }
             continue;
         }
 
@@ -158,6 +172,9 @@ export async function refreshGmp({ apply = false } = {}) {
         if (!doc.gmp) doc.gmp = {};
         doc.gmp.current = next;
         doc.gmp.lastUpdatedAtText = istNow();
+        // A real quote came through: the issue is being traded again.
+        doc.gmp.quoted = true;
+        doc.gmp.quotedAtText = istNow();
         doc.gmp.history = [...(doc.gmp.history || []), { date: new Date(), gmp: next }].slice(-60);
 
         report.updated.push({
