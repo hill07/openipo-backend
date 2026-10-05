@@ -135,9 +135,30 @@ function readCookies(res) {
     return raw ? raw.split(/,(?=\s*[^;=,]+=)/) : [];
 }
 
+/**
+ * When NSE_BASE_URL points at our own proxy rather than the exchange, every request has
+ * to carry the shared token — the proxy refuses anonymous callers so it cannot be used
+ * as a free NSE relay by anyone who finds the URL.
+ */
+const PROXY_AUTH = process.env.NSE_PROXY_TOKEN
+    ? { 'x-refresh-token': process.env.NSE_PROXY_TOKEN }
+    : {};
+
 async function nseSession() {
+    // Talking to our own relay: it holds the NSE session itself and answers on the
+    // token alone. Running the cookie bootstrap against it would read a Set-Cookie the
+    // relay never sends, and the "no session cookie" guard would then fail every run.
+    if (Object.keys(PROXY_AUTH).length) {
+        return {
+            ...PROXY_AUTH,
+            'User-Agent': UA,
+            Accept: 'application/json, text/plain, */*',
+        };
+    }
+
     const res = await fetch(`${NSE}/market-data/all-upcoming-issues-ipo`, {
         headers: {
+            ...PROXY_AUTH,
             'User-Agent': UA,
             Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
             'Accept-Language': 'en-US,en;q=0.9',
@@ -157,6 +178,7 @@ async function nseSession() {
     }
 
     return {
+        ...PROXY_AUTH,
         'User-Agent': UA,
         Accept: 'application/json, text/plain, */*',
         'Accept-Language': 'en-US,en;q=0.9',
