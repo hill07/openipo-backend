@@ -159,6 +159,15 @@ const ipoFullSchema = new mongoose.Schema({
         /** When a real quote was last seen, as opposed to when the record was touched. */
         quotedAtText: String,
 
+        /**
+         * What the share actually opened at on listing day, and the gain on the issue
+         * price. The grey market premium is a prediction; this is the outcome, and
+         * keeping both lets a reader judge how good the prediction was.
+         */
+        listingPrice: Number,
+        listingGain: Number,
+        listedAtText: String,
+
         history: [gmpHistorySchema]
     },
 

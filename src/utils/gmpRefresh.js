@@ -51,8 +51,25 @@ async function fetchRows() {
             quoted,
             sourcePercent: num(r['~gmp_percent_calc']),
             price: num(r['Price (₹)']),
+            listing: parseListing(r.Name),
         };
     });
+}
+
+/**
+ * Once an issue lists, the report appends the opening price and the gain on the issue
+ * price to its name: "Orient Cables IPO L@450 (65.44%)". That is the outcome the grey
+ * market was predicting, and it is the one figure on these pages that never changes
+ * again — so it is worth capturing the day it appears rather than reconstructing it
+ * later from an archive that is only published after the close.
+ */
+function parseListing(cell) {
+    const text = String(cell || '').replace(/<[^>]*>/g, ' ').replace(/&#8377;/g, ' ');
+    const m = text.match(/L@\s*([\d.]+)\s*\(\s*(-?[\d.]+)\s*%\s*\)/i);
+    if (!m) return null;
+    const price = num(m[1]);
+    const gain = num(m[2]);
+    return price ? { price, gain } : null;
 }
 
 /**
@@ -90,11 +107,18 @@ function findDoc(row, byKey, keys) {
  * @returns {Promise<{ report: object, backup: Array }>}
  */
 export async function refreshGmp({ apply = false } = {}) {
-    const rows = (await fetchRows()).filter((r) => LIVE_STATUSES.has(r.status));
+    // Live issues carry a premium worth updating. A listed one carries no premium at
+    // all, but its row holds the opening price — the one figure here that is final — so
+    // those rows are kept too and handled separately below.
+    const rows = (await fetchRows()).filter((r) => LIVE_STATUSES.has(r.status) || r.listing);
 
+    // Two days was enough while this job only tracked premiums, which stop at listing.
+    // Capturing the opening price needs a wider window: an issue that listed last week
+    // still has its figure in the feed, and a run that only ever looked back 48 hours
+    // would miss any listing that happened while the job was down.
     const docs = await IpoFull.find({
         isDeleted: { $ne: true },
-        'dates.listing': { $gte: new Date(Date.now() - 2 * 86400000) },
+        'dates.listing': { $gte: new Date(Date.now() - 30 * 86400000) },
     });
 
     const byKey = new Map(docs.map((d) => [nameKey(d.companyName), d]));
@@ -128,6 +152,32 @@ export async function refreshGmp({ apply = false } = {}) {
             );
             continue;
         }
+
+        // Listing price, captured before anything else.
+        //
+        // Once an issue lists the grey market stops quoting it, so this would otherwise
+        // fall into the no-quote branch below and never be read. It is also the one
+        // figure here that is final — recording it the day it appears avoids depending
+        // on the exchange's end-of-day archive, which is not published until after the
+        // close and so cannot serve a listing-morning page.
+        if (row.listing && !doc.gmp?.listingPrice) {
+            if (!doc.gmp) doc.gmp = {};
+            doc.gmp.listingPrice = row.listing.price;
+            doc.gmp.listingGain = row.listing.gain;
+            doc.gmp.listedAtText = istNow();
+            report.listed = report.listed || [];
+            report.listed.push(`${doc.companyName}: listed at ₹${row.listing.price} (${row.listing.gain}%)`);
+            if (apply) {
+                try {
+                    await doc.save();
+                } catch (error) {
+                    report.errors.push(`${doc.companyName}: save failed — ${error.message}`);
+                }
+            }
+        }
+
+        // A listed issue has no premium to track; its row was kept only for the price above.
+        if (!LIVE_STATUSES.has(row.status)) continue;
 
         // The grey market has stopped quoting this issue: the report shows "--" rather
         // than a figure. The premium is published as zero.
