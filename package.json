@@ -20,7 +20,8 @@
     "logos:switch": "node src/scripts/localiseLogos.js switch",
     "fill:content": "node src/scripts/fillContent.js",
     "enrich:exchange": "node src/scripts/enrichFromExchange.js",
-    "extract:facts": "node src/scripts/extractIpoFacts.js"
+    "extract:facts": "node src/scripts/extractIpoFacts.js",
+    "capture:listing": "node src/scripts/captureListing.js"
   },
   "dependencies": {
     "bcrypt": "^6.0.0",

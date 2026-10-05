@@ -6,6 +6,7 @@ import { discoverIpos } from '../utils/ipoDiscovery.js';
 import { auditIpoData } from '../utils/subscriptionAudit.js';
 import { isRunning, withJobLock } from '../utils/jobLock.js';
 import logger from '../utils/logger.js';
+import { captureListingPrices } from '../utils/listingPrice.js';
 
 /**
  * Trigger endpoint for an external scheduler (cron-job.org).
@@ -29,6 +30,10 @@ const lastRun = {};
 
 const JOBS = {
     subscription: () => refreshSubscriptions({ apply: true }),
+    // The listing price exists only during the exchange's special pre-open session,
+    // roughly 09:00-10:00 on a listing day. Its own job so it can be scheduled for that
+    // window instead of running all day for nothing.
+    listing: () => captureListingPrices({ apply: true }),
     gmp: () => refreshGmp({ apply: true }),
     // Publishes IPOs that exist in the market but not in our database. Without it the
     // refresh jobs have nothing to update and a new issue never appears on the site.
@@ -65,6 +70,10 @@ function summarize(job, report) {
     }
     if (job === 'gmp') {
         return `updated ${report.updated.length}, unchanged ${report.unchanged.length}, no quote ${report.noQuote.length}`;
+    }
+    if (job === 'listing') {
+        return `captured ${report.captured.length} of ${report.candidates ?? 0} pending` +
+            (report.errors.length ? `, errors ${report.errors.length}` : '');
     }
     // Say it outright when an exchange was unreachable. The run still succeeds — the
     // fallback feed covers it — so without this the summary reads like a healthy pass
@@ -155,6 +164,9 @@ function details(job, report) {
     }
     if (job === 'gmp') {
         return { updated: report.updated.map((u) => `${u.name}: ₹${u.from} -> ₹${u.to}`), noQuote: report.noQuote.length };
+    }
+    if (job === 'listing') {
+        return { captured: report.captured, skipped: report.skipped, buckets: report.buckets, errors: report.errors };
     }
     return {
         updated: report.updated.map((u) => `${u.name}: ${Number(u.total).toFixed(2)}x`),
