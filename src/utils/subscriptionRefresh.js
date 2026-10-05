@@ -37,7 +37,9 @@ const BSE_SUB_REPORT = 333;
 
 const UA =
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36';
-const NSE = 'https://www.nseindia.com';
+// Overridable so the fallback path can be exercised, and so the calls can be pointed
+// at a proxy if the NSE starts refusing our host's address.
+const NSE = (process.env.NSE_BASE_URL || 'https://www.nseindia.com').replace(/\/$/, '');
 
 // No upstream gets to hang the job. Without this a stalled NSE connection held the
 // lock open and every later run answered 409 until the service restarted.
@@ -372,8 +374,22 @@ function fillFromIssueInfo(doc, detail) {
  * @returns {Promise<{ report: object, backup: Array }>} report.updated carries the per-IPO changes
  */
 export async function refreshSubscriptions({ apply = false, closedWithinDays = 2 } = {}) {
-    const headers = await nseSession();
-    const current = await getJson(`${NSE}/api/ipo-current-issue`, headers);
+    // The NSE is the better source but it is not a dependency of the whole job. It
+    // periodically refuses requests from datacentre addresses, and when it did, this
+    // threw before anything else ran — so the report-feed pass below never executed and
+    // EVERY open issue froze, mainboard and SME alike. The scheduler saw nothing wrong,
+    // because the route answers 202 before the work starts and the throw only reached a
+    // log. A dead exchange must degrade to the fallback, not take the run down with it.
+    let headers = null;
+    let current = [];
+    let nseError = null;
+    try {
+        headers = await nseSession();
+        current = await getJson(`${NSE}/api/ipo-current-issue`, headers);
+    } catch (error) {
+        nseError = error.message;
+        current = [];
+    }
 
     const today = istDay();
     const docs = await IpoFull.find({ isDeleted: { $ne: true } });
@@ -390,6 +406,7 @@ export async function refreshSubscriptions({ apply = false, closedWithinDays = 2
 
     const report = {
         activeIssues: current.length,
+        nseError,
         updated: [],
         unchanged: [],
         unmatched: [],
@@ -400,6 +417,12 @@ export async function refreshSubscriptions({ apply = false, closedWithinDays = 2
         errors: [],
     };
     const backup = [];
+
+    // Which records the NSE actually answered for in THIS run. When the NSE is
+    // unreachable — it periodically refuses datacentre addresses, which is invisible
+    // from a scheduler that only sees the 202 we send back before the work starts —
+    // this set is empty, and the report feed below takes over instead of standing down.
+    const nseCovered = new Set();
 
     for (const issue of current) {
         const doc =
@@ -431,6 +454,8 @@ export async function refreshSubscriptions({ apply = false, closedWithinDays = 2
             report.errors.push(`${doc.companyName}: ${error.message}`);
             continue;
         }
+
+        nseCovered.add(doc.slug);
 
         // Fill in what the exchange states outright before anything is computed from it.
         const filled = fillFromIssueInfo(doc, detail);
@@ -630,7 +655,7 @@ export async function refreshSubscriptions({ apply = false, closedWithinDays = 2
     }
 
     // Second pass: BSE SME issues, which the NSE feed does not carry at all.
-    await refreshBseSme({ docs, byName, report, backup, apply, today });
+    await refreshBseSme({ docs, byName, report, backup, apply, today, nseCovered });
 
     return { report, backup };
 }
@@ -649,7 +674,7 @@ const TIMES_COLUMNS = [
     { column: 'RII', aliases: ['Retail', 'RII'], canonical: 'Retail' },
 ];
 
-async function refreshBseSme({ docs, byName, report, backup, apply, today }) {
+async function refreshBseSme({ docs, byName, report, backup, apply, today, nseCovered }) {
     let rows;
     try {
         rows = await fetchReport(BSE_SUB_REPORT);
@@ -669,11 +694,12 @@ async function refreshBseSme({ docs, byName, report, backup, apply, today }) {
         const doc = findByName(byName, name);
         if (!doc || handled.has(doc.slug)) continue;
 
-        // The exchange feed is authoritative where it exists; only fill the gap.
-        if (String(doc.subscription?.source || '') === 'NSE' && doc.subscription?.categories?.length) {
-            const anyBids = doc.subscription.categories.some((c) => Number(c.appliedShares));
-            if (anyBids) continue;
-        }
+        // The NSE is authoritative where it answered, because it publishes share counts
+        // rather than multiples. But "has NSE data from some earlier run" is not the same
+        // as "the NSE answered today": keying the skip off the stored source made the NSE
+        // a single point of failure, and when it stopped responding every mainboard issue
+        // silently froze while the scheduler kept reporting success.
+        if (nseCovered?.has(doc.slug)) continue;
 
         // Guard against a name collision: the closing date must agree.
         const rowClose = fromDmy(stripHtml(row['Closing Date']));
@@ -687,6 +713,21 @@ async function refreshBseSme({ docs, byName, report, backup, apply, today }) {
 
         const status = statusOf(doc, today);
         if (status === 'future' || status === 'stale') continue;
+
+        // This feed lags the exchange by hours and quotes multiples rather than share
+        // counts, so it must never walk a figure backwards. Bids only accumulate while an
+        // issue is open: a lower overall multiple than the one on record means this row is
+        // older than what we already hold, not that demand fell.
+        // The Total cell is "<b>0.69</b><small>1st Oct 17:08</small>" — the leading number.
+        const feedMatch = stripHtml(row.Total).match(/(\d+(?:\.\d+)?)/);
+        const feedTimes = feedMatch ? Number(feedMatch[1]) : null;
+        const heldTimes = Number(doc.subscription?.totalTimes) || 0;
+        if (feedTimes !== null && heldTimes && feedTimes < heldTimes - 0.001) {
+            report.skippedRows.push(
+                `${doc.companyName}: feed shows ${feedTimes}x against ${heldTimes.toFixed(2)}x on record — older reading, skipped`
+            );
+            continue;
+        }
 
         if (!Array.isArray(doc.subscription?.categories)) doc.subscription = { categories: [] };
         const before = JSON.parse(JSON.stringify(doc.subscription.categories || []));
