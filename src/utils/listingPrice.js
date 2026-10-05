@@ -122,7 +122,16 @@ async function angelBySymbol(symbols, report) {
         const tokens = await angel.instrumentTokens(symbols);
         const list = [...tokens.values()].map((t) => t.token);
         if (!list.length) {
-            report.errors.push('Angel One: no instrument token matched the pending symbols');
+            // Nothing to quote: a company has no instrument token until it lists, so this
+            // is the normal state the evening before. Still prove the session works —
+            // otherwise a bad PIN or TOTP secret stays hidden until the one morning it
+            // matters, when there is no time to fix it.
+            try {
+                await angel.login();
+                report.buckets.push('angel: session OK, no listed symbol to quote yet');
+            } catch (error) {
+                report.errors.push(`Angel One login: ${error.message}`);
+            }
             return out;
         }
 
