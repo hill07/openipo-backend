@@ -40,6 +40,31 @@ export const computeDerivedFields = (ipoDoc) => {
 
     if (!isNaN(maxPrice) && !isNaN(lotSize) && maxPrice > 0 && lotSize > 0) {
         ipoDoc.minInvestment = maxPrice * lotSize;
+
+        // 2b. Application limits per category.
+        //
+        // SEBI defines the buckets by application VALUE, not by lot count: retail is
+        // capped at Rs 2 lakh, the small-NII band runs from there to Rs 10 lakh, and
+        // big-NII starts above that. The lot count follows from the issue's own lot size
+        // and cut-off price, so this is arithmetic rather than data — yet nothing
+        // computed it and the field was only ever filled in by hand, which is why most
+        // records had no lot ladder at all.
+        const perLot = maxPrice * lotSize;
+        const RETAIL_CAP = 200000;
+        const SNII_CAP = 1000000;
+
+        const retailMax = Math.floor(RETAIL_CAP / perLot);
+        const sniiMax = Math.floor(SNII_CAP / perLot);
+
+        // An SME lot can exceed Rs 2 lakh outright, leaving no retail band at all.
+        if (retailMax >= 1) {
+            ipoDoc.limits = {
+                retail: { minLots: 1, maxLots: retailMax },
+                shni: { minLots: retailMax + 1, maxLots: Math.max(sniiMax, retailMax + 1) },
+                // The big-NII band has no upper limit beyond the issue itself.
+                bhni: { minLots: Math.max(sniiMax, retailMax + 1) + 1, maxLots: 0 },
+            };
+        }
     }
 
     // 3. GMP Derived
