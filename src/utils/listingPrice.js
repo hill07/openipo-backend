@@ -141,9 +141,20 @@ async function angelBySymbol(symbols, report) {
         for (const [token, q] of quotes) {
             const symbol = byToken.get(token);
             if (!symbol) continue;
-            // Before the first trade prints, `ltp` is empty and the discovered price
-            // shows as the open; afterwards `ltp` is the live figure. Take either.
-            const price = q.ltp || q.open || 0;
+// `open` is the listing price: the first trade of the first day. `ltp` is whatever it
+            // is trading at now, which drifts within minutes of listing, and before any trade
+            // prints `ltp` is empty — leaving the previous close, which on listing morning is
+            // the issue price. Taking ltp first recorded SRIT India at ₹130, its issue price,
+            // for a 0% gain it never had.
+            // Only `open` is accepted, never `ltp` and never a fallback.
+            //
+            // A flat listing is real — Bench Mark Infotech and Shivchem Agro both opened
+            // exactly at their issue price — so "equals the issue price" cannot be used to
+            // detect a bad reading. The distinction that does hold is that `open` is zero
+            // until the first trade prints. Taking `ltp` first published SRIT India at
+            // ₹130 when it opened at ₹148; waiting for a real `open` simply records
+            // nothing until there is something to record, and the next run picks it up.
+            const price = Number(q.open) || 0;
             if (price) out.set(symbol, { price, previousClose: q.close || 0 });
         }
         report.buckets.push(
