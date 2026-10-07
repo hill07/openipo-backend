@@ -120,7 +120,7 @@ async function angelBySymbol(symbols, report) {
 
     try {
         const tokens = await angel.instrumentTokens(symbols);
-        const list = [...tokens.values()].map((t) => t.token);
+        const list = [...tokens.values()].map((t) => ({ token: t.token, exchange: t.exchange }));
         if (!list.length) {
             // Nothing to quote: a company has no instrument token until it lists, so this
             // is the normal state the evening before. Still prove the session works —
@@ -197,6 +197,53 @@ export async function probeSymbol(symbol) {
     };
 }
 
+/**
+ * Resolve a company that has no stored symbol, and confirm the match before trusting it.
+ *
+ * BSE-only SME issues reach us with no symbol, so they were skipped entirely — two of
+ * four listings on 7 October had no price for exactly this reason. Candidates come from
+ * the scrip master by name, which is not safe on its own (EVANS sits beside VANS), so
+ * each is quoted and kept only if its previous close equals the issue price. On listing
+ * day those are the same number, which no unrelated instrument will match.
+ *
+ * A confirmed symbol is written back, so this costs one lookup per company, once.
+ */
+async function resolveByName(doc, report) {
+    const issuePrice = Number(doc.priceBand?.max) || 0;
+    if (!issuePrice || !angel.isConfigured()) return null;
+
+    let candidates = [];
+    try {
+        candidates = await angel.candidatesByName(doc.companyName);
+    } catch (error) {
+        report.errors.push(`${doc.companyName}: name lookup — ${error.message}`);
+        return null;
+    }
+    if (!candidates.length) return null;
+
+    let quoted;
+    try {
+        ({ quotes: quoted } = await angel.quotes(candidates.map((c) => ({ token: c.token, exchange: c.exchange }))));
+    } catch (error) {
+        report.errors.push(`${doc.companyName}: quote — ${error.message}`);
+        return null;
+    }
+
+    for (const c of candidates) {
+        const q = quoted.get(String(c.token));
+        if (!q) continue;
+        const prev = Number(q.close) || 0;
+        // Within 1% covers rounding; anything else is a different company.
+        if (!prev || Math.abs(prev - issuePrice) / issuePrice > 0.01) continue;
+
+        report.buckets.push(`${doc.companyName}: matched ${c.exchange}:${c.symbol} on issue price ₹${issuePrice}`);
+        return { symbol: c.symbol, exchange: c.exchange, open: Number(q.open) || 0, previousClose: prev };
+    }
+
+    report.skipped.push(`${doc.companyName}: no candidate matched the issue price ₹${issuePrice}`);
+    return null;
+}
+
 export async function captureListingPrices({ apply = false } = {}) {
     const report = { buckets: [], captured: [], skipped: [], errors: [] };
     const today = istDay();
@@ -231,16 +278,24 @@ export async function captureListingPrices({ apply = false } = {}) {
             report.errors.push(`NSE session: ${error.message}`);
         }
     }
-    if (!prices.size) return { report };
-
     for (const doc of pending) {
         const symbol = doc.symbol?.nse;
-        if (!symbol) {
-            report.skipped.push(`${doc.companyName}: no NSE symbol on record`);
-            continue;
-        }
+        let hit = symbol ? prices.get(String(symbol).toUpperCase()) : null;
 
-        const hit = prices.get(String(symbol).toUpperCase());
+        // No stored symbol, or none of the feeds carried it: resolve the company against
+        // the broker's instrument list and confirm the match on its issue price. This is
+        // what brings BSE-only SME issues in — they have no NSE symbol and were skipped.
+        if (!hit) {
+            const resolved = await resolveByName(doc, report);
+            if (resolved) {
+                if (resolved.open) hit = { price: resolved.open, previousClose: resolved.previousClose };
+                // Keep the confirmed symbol either way, so later runs skip the lookup.
+                if (apply && resolved.symbol && !doc.symbol?.nse) {
+                    doc.symbol = { ...(doc.symbol?.toObject?.() || doc.symbol || {}), nse: resolved.symbol };
+                    try { await doc.save(); } catch { /* the price matters more than the symbol */ }
+                }
+            }
+        }
         if (!hit) continue;
 
         // The issue price is what the gain is measured against. Prefer our own figure —

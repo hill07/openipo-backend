@@ -117,26 +117,80 @@ export async function login() {
 const MASTER_TTL_MS = 12 * 60 * 60 * 1000;
 let master = { at: 0, bySymbol: new Map() };
 
+/**
+ * Look up instruments by symbol across BOTH exchanges.
+ *
+ * Restricting this to NSE silently excluded every BSE-only SME issue — a third of the
+ * IPOs here — even though the master carries 12,962 BSE instruments and the quote API
+ * accepts them. Black Opal and Vans are both in there, under their bare BSE symbols.
+ */
 export async function instrumentTokens(symbols) {
-    const wanted = new Set(symbols.map((s) => String(s).toUpperCase()));
+    const wanted = new Set(symbols.map((s) => String(s).toUpperCase()).filter(Boolean));
+    if (!wanted.size) return new Map();
+
     if (Date.now() - master.at < MASTER_TTL_MS && [...wanted].every((s) => master.bySymbol.has(s))) {
         return master.bySymbol;
     }
 
-    const res = await fetch(SCRIP_MASTER, { signal: AbortSignal.timeout(90000) });
+    const res = await fetch(SCRIP_MASTER, { signal: AbortSignal.timeout(120000) });
     if (!res.ok) throw new Error(`scrip master: ${res.status} ${res.statusText}`);
     const rows = await res.json();
 
     const bySymbol = new Map();
     for (const r of rows) {
-        if (r.exch_seg !== 'NSE') continue;
-        // "-EQ"/"-BE" suffixes are the trading symbol; the IPO record stores the bare one.
-        const base = String(r.symbol || '').replace(/-(EQ|BE|SM|ST)$/i, '').toUpperCase();
+        const exchange = String(r.exch_seg || '').toUpperCase();
+        if (exchange !== 'NSE' && exchange !== 'BSE') continue;
+
+        // NSE appends the series ("-EQ", "-ST"); BSE symbols are already bare.
+        const base = String(r.symbol || '').replace(/-(EQ|BE|SM|ST|SME)$/i, '').toUpperCase();
         if (!wanted.has(base)) continue;
-        if (!bySymbol.has(base)) bySymbol.set(base, { token: String(r.token), tradingsymbol: r.symbol });
+
+        // NSE wins a tie: it quotes in finer increments and is the primary listing for
+        // anything dual-listed. A BSE-only issue simply never has an NSE row.
+        const existing = bySymbol.get(base);
+        if (!existing || (existing.exchange === 'BSE' && exchange === 'NSE')) {
+            bySymbol.set(base, { token: String(r.token), tradingsymbol: r.symbol, exchange });
+        }
     }
     master = { at: Date.now(), bySymbol };
     return bySymbol;
+}
+
+/**
+ * Candidate instruments for a company that has no stored symbol.
+ *
+ * BSE-only SME issues arrive with no symbol at all, so there is nothing to look up.
+ * The master's symbols are compressed company names — "Black Opal Consultants" is
+ * BLACKOPAL, "Vans Electroengineerings" is VANS — which a prefix match finds.
+ *
+ * A prefix match alone is not safe: EVANS sits beside VANS in the same file. So this
+ * only proposes candidates; the caller confirms each by checking the quote's previous
+ * close against the issue price, which on listing day is the same number. A wrong
+ * instrument will not match that and is discarded.
+ */
+export async function candidatesByName(companyName) {
+    const key = String(companyName || '')
+        .toUpperCase()
+        .replace(/&/g, 'AND')
+        .replace(/(LIMITED|LTD|PRIVATE|PVT|INDIA|THE)/g, '')
+        .replace(/[^A-Z0-9]/g, '');
+    if (key.length < 4) return [];
+
+    const res = await fetch(SCRIP_MASTER, { signal: AbortSignal.timeout(120000) });
+    if (!res.ok) throw new Error(`scrip master: ${res.status} ${res.statusText}`);
+    const rows = await res.json();
+
+    const out = [];
+    for (const r of rows) {
+        const exchange = String(r.exch_seg || '').toUpperCase();
+        if (exchange !== 'NSE' && exchange !== 'BSE') continue;
+        const sym = String(r.symbol || '').replace(/-(EQ|BE|SM|ST|SME)$/i, '').toUpperCase();
+        if (sym.length < 4) continue;
+        if (!key.startsWith(sym) && !sym.startsWith(key)) continue;
+        out.push({ token: String(r.token), tradingsymbol: r.symbol, exchange, symbol: sym });
+    }
+    // Longest symbol first: the most specific match is the likeliest.
+    return out.sort((a, b) => b.symbol.length - a.symbol.length).slice(0, 6);
 }
 
 /* ---------------------------------------------------------------- quotes */
@@ -148,14 +202,24 @@ export async function instrumentTokens(symbols) {
  * from whichever of ltp / open / close carries a figure — the caller decides whether
  * that is good enough to publish.
  */
-export async function quotes(tokens) {
-    if (!tokens.length) return new Map();
-    const jwt = await login();
+export async function quotes(instruments) {
+    // Accepts either a plain list of NSE tokens or {token, exchange} pairs, so a BSE-only
+    // SME issue is quoted on the exchange it actually trades on rather than being looked
+    // up on the NSE and silently missed.
+    const list = instruments.map((i) => (typeof i === 'object' ? i : { token: String(i), exchange: 'NSE' }));
+    if (!list.length) return { quotes: new Map(), unfetched: [] };
 
+    const exchangeTokens = {};
+    for (const { token, exchange } of list) {
+        const key = exchange === 'BSE' ? 'BSE' : 'NSE';
+        (exchangeTokens[key] = exchangeTokens[key] || []).push(String(token));
+    }
+
+    const jwt = await login();
     const res = await fetch(`${BASE}/rest/secure/angelbroking/market/v1/quote/`, {
         method: 'POST',
         headers: headers(jwt),
-        body: JSON.stringify({ mode: 'FULL', exchangeTokens: { NSE: tokens } }),
+        body: JSON.stringify({ mode: 'FULL', exchangeTokens }),
         signal: AbortSignal.timeout(TIMEOUT_MS),
     });
 
